@@ -73,9 +73,9 @@ wins (one above the measured value prints a warning on `./glm53 up`). Measured o
 | 2 | on | 845,056 | 3,493 | 395,264 | 59.9 / 38.2 / 67.2 | 70.9* | 71.6* | 12/12 | 2026-11-10 |
 | 1 | on | 864,256 | 3,568 | 861,184 | as CONC 2-8 (same single-chat speed) | 51.4* | 51.4* | 12/12 | 2026-11-11 |
 | 8 | off | 544,256 | 2,318 | 21,504 | as attic on | not measured | not measured | 12/12 | 2026-11-11 |
-| 4 | off | 694,784 | 2,908 | 115,200 | as attic on | not measured | not measured | 12/12 | 2026-11-11 |
-| 2 | off | 763,136 | 2,982 | 227,328 | as attic on | not measured | not measured | 12/12 | 2026-11-11 |
-| 1 | off | 765,952 | 2,992 | 433,152 | as attic on | not measured | not measured | 12/12 | 2026-11-11 |
+| 4 | off | 694,784 | 2,906 | 134,144 | as attic on | not measured | not measured | 12/12 | 2026-11-11 |
+| 2 | off | 763,136 | 3,173 | 354,304 | as attic on | not measured | not measured | 12/12 | 2026-11-11 |
+| 1 | off | 765,952 | 3,184 | 762,880 | as attic on | not measured | not measured | 12/12 | 2026-11-11 |
 
 \* CONC 2 keeps 2 decode slots: its C4/C8 aggregate is the 4-chat/8-chat load on 2 slots (per chat 36.7/36.7),
 not a bigger pool's throughput. CONC 1 had no speed run of its own: its cells cite the CONC 2-8 single-chat rows,
