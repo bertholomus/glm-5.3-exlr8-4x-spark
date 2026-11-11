@@ -1,0 +1,24 @@
+# No-GPU smoke for the recipe: host-side checks only, no model, no GPU, no Hugging Face.
+# The reference recipes build an arm64 image in CI; this scaffold only proves the host-side parts are sound
+# (scripts parse, .env.example parses, knobs.sh dispatches TUNE, fetch prints the pins). The image build and
+# GPU boot are checked on the rig (AGENTS.md, "Boot" and "Check that it serves").
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: No-GPU smoke (host-side checks)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - name: Smoke
+        run: bash tests/ci-smoke.sh

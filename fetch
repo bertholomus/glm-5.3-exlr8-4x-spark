@@ -1,0 +1,51 @@
+#!/bin/bash
+# Fetch this box's part of the pinned release and the pinned DFlash2 drafter, from the recipe directory (compose):
+#
+#   ./fetch             check the pins in .env (or fill them from the pins below), then run
+#                       `docker compose run --rm gr8 prepare`: this box downloads its own part of the release
+#                       (~85.6 GB at TP=4, variant home) and downloads + converts its own drafter rank.
+#   ./fetch --print     print the pinned MODEL and DRAFTER lines. No network, no docker (CI uses this).
+#   ./fetch --check     check the pins only: exit 0 when MODEL and DRAFTER carry exactly the pinned commits.
+#
+# The pins are the commits measured in README.md. The drafter's licence is CC BY-NC-ND 4.0: it forbids sharing a
+# converted copy, so every box fetches and converts its own rank part; never copy a converted drafter between boxes.
+set -euo pipefail
+cd "$(dirname "$0")"
+
+MODEL_PIN='https://huggingface.co/kindlingai/glm-5.3-exlr8-k2-k3-k4@9372b74d77e129ea063bc0934df1570fc3173469'
+DRAFTER_PIN='https://huggingface.co/incoai/GLM-5.3-DFlash2@425aa615ce320caac34400208b30808c8f14f76c'
+
+print_pins() {
+  echo "MODEL=$MODEL_PIN"
+  echo "DRAFTER=$DRAFTER_PIN"
+}
+
+check_pins() {  # exit 0 when .env's MODEL/DRAFTER, if set, are exactly the pins
+  local bad=0 line name want got
+  for name in MODEL DRAFTER; do
+    want=$(eval "echo \"\${${name}_PIN}\"")
+    got=$(grep -E "^${name}=" .env 2>/dev/null | tail -1 | cut -d= -f2- || true)
+    if [ -n "$got" ] && [ "$got" != "$want" ]; then
+      echo "fetch: .env sets $name=$got, but this recipe pins $name=$want" >&2
+      echo "fetch: the rows in README.md were measured on the pinned commits; change the pin in fetch and .env together, and re-measure before publishing numbers" >&2
+      bad=1
+    fi
+  done
+  return $bad
+}
+
+case "${1:-}" in
+  --print) print_pins; exit 0 ;;
+  --check) check_pins ;;
+  '')
+    check_pins || exit 2
+    # Fill the pins into .env when it does not set them yet (a fresh copy of .env.example already carries them).
+    for name in MODEL DRAFTER; do
+      want=$(eval "echo \"\${${name}_PIN}\"")
+      grep -qE "^${name}=" .env 2>/dev/null || echo "$name=$want" >> .env
+    done
+    echo "fetch: preparing this box's part of release 9372b74d and the DFlash2 drafter (CC BY-NC-ND: this box converts its own)"
+    exec docker compose run --rm gr8 prepare
+    ;;
+  *) echo "fetch: want no argument, --print or --check" >&2; exit 2 ;;
+esac

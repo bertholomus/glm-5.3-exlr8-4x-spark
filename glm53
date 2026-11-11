@@ -1,0 +1,317 @@
+#!/bin/bash
+# The recipe's host-side launcher: docker compose, plus the checks gr8 itself does not do. Run it on each box from the
+# recipe folder, in place of the bare `docker compose` commands. The rough edges it covers were hit on this rig,
+# 2026-11-07/08: plain GR8_* .env lines silently dropped, a refused engine option leaving the container restart-looping,
+# `gr8 glm53 down` failing on a restarting container, and `down` of a stopped cluster exiting 1.
+#
+#   ./glm53 check-env            refuse a .env that gr8 would misread (exit 2): a plain GR8_* engine variable (gr8's
+#                                launcher drops it; it reaches the engine only on the EXTRA_ENV line), a line that is
+#                                not NAME=value, a name set twice (the last one wins, so a second EXTRA_ENV line
+#                                replaces the first)
+#   ./glm53 up [--build] [--no-watch]
+#                                check-env, docker compose up -d (--build: build the thin recipe image first), then
+#                                watch this box's container for 120 s: if it restarts (bad options, a refused engine
+#                                option, ...) it is stopped cleanly and the engine's own error from out/supervisor.log
+#                                is printed (exit 4). Then check-config
+#   ./glm53 check-config [--from FILE]
+#                                every knob .env sets shows in `gr8 glm53 show-config` with the value set; one that
+#                                does not is an error (exit 3). --from checks a saved show-config output instead
+#   ./glm53 down                 stop the cluster from this box (gr8 glm53 down stops every box). A box that is
+#                                already down (exited, never created), or whose container exits within 30 s of a
+#                                failed gr8 glm53 down, exits 0; a restart-looping box is stopped, its error printed,
+#                                and it exits 0 (run ./glm53 down on the other boxes too)
+#   ./glm53 error                the engine's last error lines from this box's out/supervisor.log
+#   ./glm53 conc                  print the concurrency dial's measured table for the current VARIANT
+#                                (.env's VARIANT or the TUNE default): CONC, SESS, CAP, tokens per
+#                                session by the page rule, the measured row and its date. Rows come from
+#                                conc.tsv (attic on and off rows); an uncommitted conc.local.tsv adds
+#                                this rig's own rows when present
+#   ./glm53 status|smoke|health|show-config|logs ...
+#                                gr8 glm53 <command> in this box's container
+#
+# Exit codes: 0 ok, 2 bad .env, 3 a set knob did not reach gr8, 4 the container restarted within the watch, 1 other.
+# Environment: GLM53_ENV_FILE (.env), GLM53_WATCH_S (120), GLM53_POLL_S (5), GLM53_DOWN_WAIT_S (30),
+# GLM53_NOT_CHECKED (more names for check-config to skip), DOCKER (docker).
+set -euo pipefail
+cd "$(dirname "$0")"
+
+CONTAINER=glm53-4x-spark                                   # compose.yaml container_name
+ENV_FILE=${GLM53_ENV_FILE:-.env}
+WATCH_S=${GLM53_WATCH_S:-120}
+POLL_S=${GLM53_POLL_S:-5}
+DOWN_WAIT_S=${GLM53_DOWN_WAIT_S:-30}
+DOCKER=${DOCKER:-docker}
+SUPERVISOR_LOG=/var/lib/gr8/home/out/supervisor.log        # GR8_WORK_DIR (compose.yaml) + out/supervisor.log
+# Plain GR8_* names that are not engine variables: gr8 launcher options (GR8_MODEL, GR8_WORK_DIR; `./gr8 glm53 knobs`)
+# and the names compose.yaml reads (GR8_IMAGE, GR8_STOP_GRACE, GR8_CACHE, GR8_HOME).
+PLAIN_GR8_OK=" GR8_MODEL GR8_WORK_DIR GR8_IMAGE GR8_STOP_GRACE GR8_CACHE GR8_HOME "
+# Names show-config does not echo: knobs.sh's TUNE and MENTAT (MENTAT=0 is dropped, 1 becomes MENTAT=localhost), the
+# compose-only names, and the fetcher's HF_TOKEN (a secret: never printed) and FETCH_JOBS.
+NOT_CHECKED=" TUNE MENTAT GR8_IMAGE GR8_STOP_GRACE GR8_CACHE GR8_HOME HF_TOKEN FETCH_JOBS ${GLM53_NOT_CHECKED:-} "
+
+# --------------------------------------------------------------------------------------------------------- .env
+env_lines() {  # one "NAME<TAB>value" per assignment in $ENV_FILE ("BAD<TAB>line" for a line that is not one)
+  local line k v
+  while IFS= read -r line || [ -n "$line" ]; do
+    line=${line%$'\r'}
+    [[ $line =~ ^[[:space:]]*(#|$) ]] && continue
+    line=${line#export }
+    if [[ ! $line =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+      printf 'BAD\t%s\n' "$line"
+      continue
+    fi
+    k=${BASH_REMATCH[1]} v=${BASH_REMATCH[2]}
+    if [[ $v =~ ^\"(.*)\"$ ]] || [[ $v =~ ^\'(.*)\'$ ]]; then
+      v=${BASH_REMATCH[1]}
+    else  # compose drops an unquoted value's " # comment" and trailing blanks
+      v=$(printf '%s' "$v" | sed -e 's/[[:space:]]#.*$//' -e 's/[[:space:]]*$//')
+    fi
+    printf '%s\t%s\n' "$k" "$v"
+  done < "$ENV_FILE"
+}
+
+env_get() {  # the value .env gives $1 (empty when unset)
+  env_lines | awk -F'\t' -v k="$1" '$1 == k { v = $2 } END { print v }'
+}
+
+cmd_check_env() {
+  local bad=0 seen=" " k v
+  [ -f "$ENV_FILE" ] || { echo "$ENV_FILE: missing (cp .env.example .env, then set PEERS, IPS and IPS2)" >&2; return 2; }
+  while IFS=$'\t' read -r k v; do
+    if [ "$k" = BAD ]; then
+      echo "$ENV_FILE: not a NAME=value line: $v" >&2
+      bad=1
+      continue
+    fi
+    case "$seen" in *" $k "*)
+      echo "$ENV_FILE: $k is set twice; the last line wins. Keep one $k line (for EXTRA_ENV: one line, the words space-separated)." >&2
+      bad=1 ;;
+    esac
+    seen="$seen$k "
+    case "$k" in GR8_*)
+      case "$PLAIN_GR8_OK" in *" $k "*) ;; *)
+        echo "$ENV_FILE: $k=$v: gr8 engine variables on their own line never reach the engine (gr8's launcher drops them)." >&2
+        echo "  Move it onto the one EXTRA_ENV line, after what is there: EXTRA_ENV=<what is there> $k=$v" >&2
+        bad=1 ;;
+      esac ;;
+    esac
+    if [ "$k" = EXTRA_ENV ]; then
+      local w
+      for w in $v; do
+        [[ $w =~ ^[A-Za-z_][A-Za-z0-9_]*=. ]] || { echo "$ENV_FILE: EXTRA_ENV word '$w' is not NAME=value" >&2; bad=1; }
+      done
+    fi
+  done < <(env_lines)
+  [ "$bad" = 0 ] || return 2
+  # the warning knobs.sh prints in the container on every boot and command, here before the boot too
+  [ "$(env_get TUNE)" != agents-fast ] || echo "WARNING: TUNE=agents-fast sets GR8_REUSE_ALIGN=0: not bit-exact against" \
+    "a cold prefill (gr8 SETTINGS.md). A warm turn can get other temp-0 text than the same request sent cold." \
+    "TUNE=agents keeps exact output." >&2
+  echo "ok: $ENV_FILE (no plain GR8_* engine variable, no name set twice)"
+}
+
+# ---------------------------------------------------------------------------------------------- show-config check
+has_word() {  # has_word WORD: WORD is one of stdin's whitespace-separated words
+  awk -v w="$1" '{ for (i = 1; i <= NF; i++) if ($i == w) { found = 1; exit } } END { exit !found }'
+}
+
+applied() {  # applied NAME VALUE SHOW_CONFIG_TEXT: the knob shows in show-config with that value
+  local k=$1 v=$2 show=$3 tv
+  # the options table: "  NAME  VALUE  scope  (source)"
+  tv=$(printf '%s\n' "$show" | awk -v k="$k" '$1 == k && NF >= 2 { print $2; exit }')
+  [ -n "$v" ] && [ "$tv" = "$v" ] && return 0
+  # a pinned URL (NAME=https://...@<commit>) that the table prints without its @<commit>: the commit must show elsewhere
+  if [[ $v == *@* ]] && [ "$tv" = "${v%@*}" ] && printf '%s\n' "$show" | grep -qF -- "${v##*@}"; then
+    return 0
+  fi
+  # the cluster options ("  NAME=VALUE") and the engine env ("  engine.env=GR8_NAME=VALUE ...")
+  printf '%s\n' "$show" | sed -e 's/^ *engine\.env=//' | has_word "$k=$v" && return 0
+  printf '%s\n' "$show" | sed -e 's/^ *engine\.env=//' | has_word "GR8_$k=$v" && return 0
+  return 1
+}
+
+verify_config() {  # verify_config SHOW_CONFIG_TEXT
+  local show=$1 missing=0 k v w extra
+  [ -n "$show" ] || { echo "show-config printed nothing" >&2; return 3; }
+  # the words gr8 received on EXTRA_ENV and the engine env it built
+  extra=$(printf '%s\n' "$show" | awk '$1 == "EXTRA_ENV" { for (i = 2; i <= NF; i++) if ($i ~ /=/) print $i }
+                                      /^ *engine\.env=/ { sub(/^ *engine\.env=/, ""); print }')
+  while IFS=$'\t' read -r k v; do
+    [ "$k" = BAD ] && continue
+    case "$NOT_CHECKED" in *" $k "*) continue ;; esac
+    [ "$k" = PEERS ] && [ "$(env_get MENTAT)" = 1 ] && continue   # knobs.sh unsets PEERS under MENTAT=1
+    if [ "$k" = EXTRA_ENV ]; then
+      for w in $v; do
+        printf '%s\n' "$extra" | has_word "$w" \
+          || { echo "MISSING: EXTRA_ENV word $w is not in show-config's EXTRA_ENV or engine.env" >&2; missing=1; }
+      done
+      continue
+    fi
+    applied "$k" "$v" "$show" || { echo "MISSING: $k=$v ($ENV_FILE) is not what show-config reports" >&2; missing=1; }
+  done < <(env_lines)
+  if [ "$missing" != 0 ]; then
+    echo "a knob set in $ENV_FILE did not reach gr8 (above): the boot is NOT running what .env says. Fix .env, ./glm53 down, ./glm53 up." >&2
+    return 3
+  fi
+  echo "ok: every knob in $ENV_FILE shows in show-config"
+}
+
+cmd_check_config() {
+  local show
+  if [ "${1:-}" = --from ]; then
+    show=$(cat "${2:?--from FILE}")
+  else
+    show=$("$DOCKER" compose exec -T gr8 gr8 glm53 show-config) || { echo "gr8 glm53 show-config failed" >&2; return 3; }
+  fi
+  verify_config "$show"
+}
+
+# --------------------------------------------------------------------------------------- container state, errors
+container_state() {  # "<status> <restart count> <last exit code>", or "absent 0 0"
+  "$DOCKER" inspect -f '{{.State.Status}} {{.RestartCount}} {{.State.ExitCode}}' "$CONTAINER" 2>/dev/null \
+    || echo "absent 0 0"
+}
+
+exit_meaning() {
+  case "$1" in
+    0) echo "a stop" ;; 1) echo "a rank failed" ;; 2) echo "bad options" ;; 4) echo "the boxes' handshake refused the boot" ;;
+    *) echo "see out/supervisor.log" ;;
+  esac
+}
+
+cmd_error() {  # the engine's own error: the lines of out/supervisor.log that name one, then its last lines
+  local log
+  log=$("$DOCKER" cp "$CONTAINER:$SUPERVISOR_LOG" - 2>/dev/null | tar -x -O -f - 2>/dev/null) || log=""
+  if [ -z "$log" ]; then
+    echo "(no $SUPERVISOR_LOG in $CONTAINER; its docker log follows)"
+    "$DOCKER" logs --tail 30 "$CONTAINER" 2>&1 || true
+    return 0
+  fi
+  printf '%s\n' "$log" | grep -iE 'error|refus|unknown|invalid|not a|fatal|traceback|exit' | tail -n 15 || true
+  echo "--- last lines of out/supervisor.log ---"
+  printf '%s\n' "$log" | tail -n 25
+}
+
+stop_loop() {  # a restart-looping container: no more restarts, then stopped (./glm53 up recreates it)
+  "$DOCKER" update --restart=no "$CONTAINER" >/dev/null 2>&1 || true
+  "$DOCKER" compose stop gr8 >/dev/null 2>&1 || "$DOCKER" stop "$CONTAINER" >/dev/null 2>&1 || true
+}
+
+watch_restarts() {
+  local end=$(( $(date +%s) + WATCH_S )) st rc code
+  while :; do
+    read -r st rc code < <(container_state)
+    if [ "$st" = restarting ] || [ "${rc:-0}" -gt 0 ]; then
+      echo "$CONTAINER restarted within ${WATCH_S}s of up (status $st, restarts $rc, last exit $code: $(exit_meaning "$code")). Stopping it. The engine's error:" >&2
+      cmd_error >&2
+      stop_loop
+      echo "stopped: fix .env (a refused option shows above), then ./glm53 up again on every box" >&2
+      return 4
+    fi
+    [ "$(date +%s)" -ge "$end" ] && break
+    sleep "$POLL_S"
+  done
+  echo "ok: $CONTAINER has not restarted in ${WATCH_S}s (status $st)"
+}
+
+cmd_up() {
+  local watch=1 args=(up -d) a
+  for a in "$@"; do
+    case "$a" in
+      --no-watch) watch=0 ;;
+      --build) args+=(--build) ;;
+      *) echo "up: unknown option $a (want --build, --no-watch)" >&2; return 1 ;;
+    esac
+  done
+  if [ "$(grep -E '^ATTIC=' "$ENV_FILE" 2>/dev/null | tail -1 | cut -d= -f2- || true)" = 1 ]; then
+    # the memory-reserve overlay mounts atticd's socket and key (compose.attic.yaml; .env's image must have
+    # the client — knobs.sh refused ATTIC=1 on the pinned image before this file was written)
+    args=(-f compose.yaml -f compose.attic.yaml "${args[@]}")
+  fi
+  cmd_check_env
+  # a container ./glm53 stopped out of a restart loop has restart=no: recreate it with compose's restart policy
+  if [ "$("$DOCKER" inspect -f '{{.HostConfig.RestartPolicy.Name}}' "$CONTAINER" 2>/dev/null || true)" = no ]; then
+    args+=(--force-recreate)
+  fi
+  "$DOCKER" compose "${args[@]}"
+  if [ "$watch" = 1 ]; then
+    watch_restarts
+  fi
+  cmd_check_config
+  echo "up: this box is started. Start the other boxes within 600 s; on the head, ./glm53 health exits 0 once the cluster serves."
+}
+
+cmd_down() {
+  local st rc code
+  read -r st rc code < <(container_state)
+  case "$st" in
+    running)
+      if "$DOCKER" compose exec -T gr8 gr8 glm53 down; then
+        return 0
+      fi
+      # the head's exec dies with its container (rc 137 on this rig): a container that has exited is down
+      local end=$(( $(date +%s) + DOWN_WAIT_S ))
+      while :; do
+        read -r st rc code < <(container_state)
+        case "$st" in exited|created|dead|absent)
+          echo "down: $CONTAINER is $st: down"
+          return 0 ;;
+        esac
+        [ "$(date +%s)" -ge "$end" ] && break
+        sleep "$POLL_S"
+      done
+      echo "down: gr8 glm53 down failed and $CONTAINER is $st after ${DOWN_WAIT_S}s" >&2
+      return 1 ;;
+    restarting)
+      echo "down: $CONTAINER is restart-looping (restarts $rc, last exit $code: $(exit_meaning "$code")). Stopping it. The engine's error:" >&2
+      cmd_error >&2
+      stop_loop
+      echo "down: this box is stopped. gr8 glm53 down cannot reach the other boxes from a looping box: run ./glm53 down on each of them too." >&2
+      return 0 ;;
+    paused)
+      echo "down: $CONTAINER is paused; docker unpause $CONTAINER, then ./glm53 down" >&2
+      return 1 ;;
+    *)
+      echo "down: $CONTAINER is $st: already down"
+      return 0 ;;
+  esac
+}
+
+cmd_conc() {  # ./glm53 conc: the concurrency dial's measured table for the current VARIANT
+  # VARIANT as the boot would set it: .env's line, else the TUNE default (the same rule knobs.sh uses;
+  # knobs.sh itself needs PEERS, which ./glm53 conc must not require)
+  local variant tunedefault
+  case "$(grep -E '^TUNE=' "$ENV_FILE" 2>/dev/null | tail -1 | cut -d= -f2)" in
+    *) tunedefault=home ;;
+  esac
+  variant=$(grep -E '^VARIANT=' "$ENV_FILE" 2>/dev/null | tail -1 | cut -d= -f2- || true)
+  variant=${variant:-$tunedefault}
+  local key
+  key=$(conc_variant_key "$variant")
+  local attic
+  attic=$(grep -E '^ATTIC=' "$ENV_FILE" 2>/dev/null | tail -1 | cut -d= -f2- || true)
+  attic=${attic:-0}
+  echo "concurrency dial for VARIANT=$variant (key ${key:-unknown}, attic $attic): CONC sets SESS; CAP is the largest"
+  echo "a boot at that SESS measured holding the floor (9 GiB free at ready, never under 8 under load). A CAP you set"
+  echo "keeps your value; one above a row's CAP warns. Rows with attic on need ATTIC=1 and an image with the"
+  echo "memory-reserve client. Source: conc.tsv."
+  echo ""
+  printf 'CONC\tattic\tSESS\tCAP\tpages/rank\ttokens/session\tmeasured\n'
+  local rows
+  rows=$(conc_rows_for "$key" "$attic" || true)
+  if [ -z "$rows" ]; then
+    echo "(no measured row for VARIANT=$variant: CONC falls back to SESS=CONC and the TUNE's CAP, with a stderr line)"
+    return 0
+  fi
+  printf '%s\n' "$rows" | awk -F'\t' '{printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $2, $3, $4, $5, $6, $7, $8}'
+}
+case "${1:-}" in
+  check-env) cmd_check_env ;;
+  conc) . ./conc_lookup.sh; cmd_conc ;;
+  check-config) shift; cmd_check_config "$@" ;;
+  up) shift; cmd_up "$@" ;;
+  down) cmd_down ;;
+  error) cmd_error ;;
+  status|smoke|health|show-config|logs) exec "$DOCKER" compose exec -T gr8 gr8 glm53 "$@" ;;
+  *) sed -n '2,/^set -euo/p' "$0" | sed -e '$d' -e 's/^# \{0,1\}//' >&2; exit 1 ;;
+esac

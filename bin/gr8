@@ -1,0 +1,6 @@
+#!/bin/bash
+# gr8's ./gr8 with the recipe's knobs applied (knobs.sh): `gr8 glm53 smoke`, `gr8 glm53 status`,
+# `gr8 glm53 bench --hosts ""`, `gr8 glm53 show-config --tp 4`.
+set -euo pipefail
+. /opt/glm53-4x/knobs.sh
+exec /opt/gr8/gr8 "$@"

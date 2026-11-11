@@ -1,0 +1,5 @@
+.env
+.env.discard
+tests/.smoke-run-*
+*.json.tmp
+__pycache__/

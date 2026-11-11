@@ -1,0 +1,35 @@
+# The recipe's ATTIC=1 compose overlay (ATTIC=1 in .env): the memory-reserve layer
+# (spark-attic, github.com/bertholomus/spark-attic) lends each rank its display-carveout slice so the KV pool
+# can grow. Used as
+#   docker compose -f compose.yaml -f compose.attic.yaml up -d
+# with docker/.env naming an image WITH the attic client (the pinned ghcr.io/kindlingai/gr8:sha-e231adb has none, and
+# ./glm53 / knobs.sh refuse ATTIC=1 on it) and EXTRA_ENV carrying
+# GR8_ATTIC_SOCK=/run/spark-attic/attic.sock GR8_ATTIC_KEY_FILE=/run/gr8-attic/key.
+# atticd's socket is 0660 root:root and its key 0600 root (/etc/spark-attic; both untouched): the engine (uid
+# 1000) joins group 0 for the socket (mounted read-only), and a one-shot root container copies the key (mounted
+# read-only) into a volume where only uid 1000 can read it.
+services:
+  attic-key:
+    image: ${GR8_IMAGE}
+    user: "0:0"
+    entrypoint: ["/usr/bin/install", "-m", "0400", "-o", "1000", "-g", "1000", "/k/key", "/v/key"]
+    network_mode: none
+    cap_drop: [ALL]
+    cap_add: [CHOWN, FOWNER]
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    volumes:
+      - /etc/spark-attic/key:/k/key:ro
+      - attic:/v
+    restart: "no"
+  gr8:
+    group_add: ["0"]
+    depends_on:
+      attic-key:
+        condition: service_completed_successfully
+    volumes:
+      - /run/spark-attic:/run/spark-attic:ro
+      - attic:/run/gr8-attic:ro
+volumes:
+  attic:

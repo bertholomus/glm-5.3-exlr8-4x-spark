@@ -1,0 +1,20 @@
+# conc.tsv — the concurrency dial's measured rows Tab-separated.
+# variant_key	conc	attic	sess	cap	pages_a_rank	tokens_per_session	date
+# variant_key: the VARIANT name for shipped manifests; sha256:<16 hex> for a custom manifest path (the file's
+#              own hash — a path means nothing on another box). ./glm53 conc prints this table for the VARIANT.
+# attic: on|off. on = measured with the memory-reserve layer (spark-attic) lending (ATTIC=1; needs a gr8 image
+#              with the attic client); off = the stock memory layout (the pinned image). ATTIC selects which rows a boot uses.
+# tokens_per_session: the largest T (1,024-token grid) with CONC x pages_a_rank(T) <= pages, by the engine page
+#              rule at SHARE_LIMIT 16384 (a session incl. its 320-token generation needs
+#              256 + (T + 2368 - 16384)/256 pages).
+# Rows are boots that held the serving floor (MemAvailable ready >= 9 GiB, never under 8 GiB under load, per box).
+# A CAP above a row's value for the same CONC+attic is your call (the recipe warns; it does not refuse).
+# No fitted or interpolated CAP ships here. Rows still measuring say "measuring" in the CAP cell.
+sha256:96088ccebefbc21b	2	on	2	845056	3493	395264	2026-11-10
+sha256:96088ccebefbc21b	4	on	4	776704	3226	154624	2026-11-10
+sha256:96088ccebefbc21b	8	on	8	617984	2606	30720	2026-11-11
+sha256:96088ccebefbc21b	1	on	1	864256	3568	861184	2026-11-11
+sha256:96088ccebefbc21b	8	off	8	544256	2318	21504	2026-11-11
+sha256:96088ccebefbc21b	4	off	4	694784	2908	115200	2026-11-11
+sha256:96088ccebefbc21b	2	off	2	763136	2982	227328	2026-11-11
+sha256:96088ccebefbc21b	1	off	1	765952	2992	433152	2026-11-11

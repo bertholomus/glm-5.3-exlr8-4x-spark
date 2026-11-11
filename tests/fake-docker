@@ -1,0 +1,31 @@
+#!/bin/bash
+# A stand-in for docker in tests/ci-smoke.sh (DOCKER=tests/fake-docker ./glm53 ...): it logs every call to FAKE_LOG
+# and answers from these variables. Nothing here touches docker, a container or the network.
+#   FAKE_STATE           "running 0 0", "restarting 3 2", "exited 0 0" (status, restarts, last exit), or absent
+#   FAKE_POLICY          the container's restart policy: on-failure (default) or no
+#   FAKE_SHOW_CONFIG     the file `gr8 glm53 show-config` prints
+#   FAKE_DOWN_RC         the exit code of `gr8 glm53 down` (0)
+#   FAKE_SUPERVISOR_DIR  a folder holding supervisor.log, for `docker cp` (unset: the copy fails)
+set -euo pipefail
+echo "docker $*" >> "${FAKE_LOG:-/dev/null}"
+case "$1" in
+  inspect)
+    case "$3" in
+      *RestartPolicy*) echo "${FAKE_POLICY:-on-failure}" ;;
+      *) if [ "${FAKE_STATE:-absent}" = absent ]; then echo "Error: No such object: $4" >&2; exit 1; fi
+         echo "$FAKE_STATE" ;;
+    esac ;;
+  cp) [ -n "${FAKE_SUPERVISOR_DIR:-}" ] || exit 1
+      tar -c -f - -C "$FAKE_SUPERVISOR_DIR" supervisor.log ;;
+  update|stop) : ;;
+  logs) echo "fake docker log line" ;;
+  compose)
+    shift
+    case "$*" in
+      "up -d"*|"stop gr8") : ;;
+      *"glm53 show-config") cat "$FAKE_SHOW_CONFIG" ;;
+      *"glm53 down") exit "${FAKE_DOWN_RC:-0}" ;;
+      *) echo "fake docker: unexpected: compose $*" >&2; exit 9 ;;
+    esac ;;
+  *) echo "fake docker: unexpected: $*" >&2; exit 9 ;;
+esac

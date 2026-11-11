@@ -1,0 +1,5 @@
+fixture for tests/ci-smoke.sh (synthetic lines in the shape of the 2026-11-08 refusal on this rig)
+supervisor: rank 0 of 4, peers 192.0.2.1,192.0.2.2,192.0.2.3,192.0.2.4
+supervisor: starting the engine
+supervisor: engine refused its options: GR8_MOE_TOPK is a Flash-model option
+supervisor: exit 2
