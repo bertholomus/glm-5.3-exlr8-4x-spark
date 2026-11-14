@@ -1,5 +1,10 @@
 # GLM-5.3 (full) EXLR8 on four DGX Sparks
-**If you are an agent booting this recipe for someone: read [AGENTS.md](AGENTS.md) first, then the Quickstart.**
+> **Installing with an AI agent? (most people do)** Paste this into Claude Code, Codex, ChatGPT or your own agent:
+>
+> `Install https://github.com/bertholomus/glm-5.3-exlr8-4x-spark on my four DGX Sparks. Follow its AGENTS.md exactly.`
+>
+> [AGENTS.md](AGENTS.md) is written for the agent: rules, a fast path, a check for every step, and the fix for each
+> failure. Claude Code also reads [CLAUDE.md](CLAUDE.md), which points to the same file.
 
 [GLM-5.3](https://huggingface.co/zai-org/GLM-5.3) on four DGX Sparks (GB10, 128 GB each) at TP=4, served by
 [gr8](https://github.com/kindlingai/gr8) from the kindlingai exlr8 release

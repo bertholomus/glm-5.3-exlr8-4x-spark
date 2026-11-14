@@ -1,9 +1,42 @@
-# For agents: boot GLM-5.3 (full) on four DGX Sparks
+# For agents: install GLM-5.3 (full) on four DGX Sparks
 
-You are booting this recipe for someone. This file has the steps, every knob, and how to check each step. It is taken
-from README.md, `knobs.sh`, `.env.example`, `compose.yaml`, the `Dockerfile` and gr8's docs. If this file and `knobs.sh`
-or `compose.yaml` disagree, follow `knobs.sh` and `compose.yaml`, and tell the person. If you cannot run a check
-yourself, ask the person.
+This file is written for an AI agent (Claude Code, Codex, ChatGPT, Cursor, Hermes, ...) that installs this recipe for
+a person. A person can also paste this one line into their agent:
+
+> Install https://github.com/bertholomus/glm-5.3-exlr8-4x-spark on my four DGX Sparks. Follow its AGENTS.md exactly.
+
+## Rules for the agent
+
+- **Ask before you act** for anything that needs root, changes a firewall, or stops a running model. Say what the
+  command does first.
+- **Never invent values.** The four boxes' addresses (`PEERS`, `IPS`, `IPS2`) come from the boxes (`ip -br addr`) or
+  from the person. If you cannot read them, ask.
+- **Run every check in this file and show its output.** A step is done when its check passes, not when the command
+  returns.
+- **Keep the defaults** (`TUNE=quality`, `CONC=4`, `BUSY=0`, `ATTIC=0`, SSD store off) unless the person asks for
+  something else. Section 2 says what each one trades.
+- **Do not publish numbers** from your run as this recipe's numbers. README.md holds the measured rows and on what
+  hardware.
+- If this file and `knobs.sh` or `compose.yaml` disagree, follow `knobs.sh` and `compose.yaml`, and tell the person.
+
+## Fast path (the whole install)
+
+Run on the head box, from a clone of this repo. Each line has its check; stop at the first one that fails and use
+section 5.
+
+```bash
+git clone https://github.com/bertholomus/glm-5.3-exlr8-4x-spark && cd glm-5.3-exlr8-4x-spark
+cp .env.example .env              # then set PEERS, IPS, IPS2 (section 1, last item): the same file on every box
+DRY_RUN=1 ./glm53 install         # prints the plan for all four boxes; changes nothing
+./glm53 install                   # this box, then the other three over ssh (INSTALL_SSH_USER, INSTALL_PEER_DIR)
+./fetch                           # on EVERY box: that box's part of the weights (~86 GB); resumes if run again
+./fetch --check                   # on every box: exit 0 = the pinned commits
+./glm53 up                        # on all four boxes within 10 minutes; exit 0 = checks passed
+./glm53 smoke                     # on the head: exit 0 = every API case passes
+```
+
+Then the API is OpenAI-compatible at `http://<head>:8100/v1`, model name `glm-5.3`. Sections 1-6 are the detail
+behind each line: read section 1 before the first command.
 
 ## 1. Check the four boxes
 
@@ -62,15 +95,22 @@ the int4 KV knobs (rows on this rig not yet measured).
 
 Every value also carries the recipe defaults from `.env.example`:
 
-- `KV_STORE=ssd:/var/lib/gr8/cache/kv,size=200G,persist=on,keep=sessions` and `GR8_STOP_GRACE=150s`: at an orderly
-  stop each rank writes its open chats to the SSD store; the next boot reads the index back, so a chat's next turn
-  restores its KV instead of a prefill. `GR8_STOP_GRACE` is read by `compose.yaml` (`stop_grace_period`); without it
-  docker kills the engine mid-store. `SESS`/`CAP` notes: the pool is shared by the sessions; a request holds at most
-  `CAP` less the guard rows.
+- The SSD KV store is an **opt-in tier, off by default** (two commented lines in `.env.example`):
+  `KV_STORE=ssd:/var/lib/gr8/cache/kv,size=200G,persist=on,keep=sessions` and `GR8_STOP_GRACE=150s`. With both on, at
+  an orderly stop each rank writes its open chats to the SSD store and the next boot restores them. It writes about
+  150 GB/h a box during stop drains (README.md, "Switching"). Turn it on only if the person asks; uncomment BOTH lines.
+  `GR8_STOP_GRACE` is read by `compose.yaml` (`stop_grace_period`); without it docker kills the engine mid-store.
+- `SESS`/`CAP`: the pool is shared by the sessions; a request holds at most `CAP` less the guard rows. `CONC=1|2|4|8`
+  sets both from the measured table (`./glm53 conc` prints it).
+- `BUSY=1` (off by default): the busy guard. A request that would evict a live session's cache gets HTTP 429 +
+  `Retry-After` instead. It needs a gr8 image with the guard (README.md, "The busy guard"); `knobs.sh` refuses
+  `BUSY=1` on an image without it and names the fix. Tell the person their clients must retry on 429.
+- `ATTIC=1` (off by default): spark-attic memory lending; needs the spark-attic daemon on every box and an image with
+  its client (README.md). Do not turn it on unless the person has spark-attic installed.
 - `EXTRA_ENV=GR8_GEN_CACHE=/var/lib/gr8/cache/gen-cache`: the loader's gen cache on each box's disk (first boot of an
   image writes it; about 4.8 GB a box for GLM-5.3, per gr8 docs/SWITCHING.md).
 
-**The UPDATE 2 rule (verified on this rig, 2026-11-07): `GR8_*` engine knobs reach the engine only through
+**The EXTRA_ENV rule (verified on this rig, 2026-11-07): `GR8_*` engine knobs reach the engine only through
 `EXTRA_ENV`.** A plain `GR8_FOO=...` line in `.env` is dropped by the launcher (`-e GR8_MOE_TOPK=6` never reached
 `engine.env`; `-e EXTRA_ENV=GR8_MOE_TOPK=6` did). Append new `GR8_*` knobs to the one `EXTRA_ENV` line,
 space-separated `NAME=value`, never replacing what is already there. Short launcher names (`SESS`, `CAP`, `KV_FORMAT`,
@@ -93,8 +133,11 @@ Every knob:
 | `CAP` | the KV pool in tokens, a multiple of 64 | by `TUNE` (485376; 513536 with `TUNE=context`) |
 | `KV_FORMAT` | `fp8` or `int4` | by `TUNE` (unset = fp8) |
 | `SHARE_LIMIT` | requests up to this many tokens (prompt + max_tokens) share decode steps; every rank holds a session's first `SHARE_LIMIT` tokens and a share of the rest | by `TUNE` (unset = gr8's 32768; 16384 with `TUNE=agents` and `agents-fast`) |
-| `KV_STORE` | `ssd:<dir>,size=200G,persist=on,keep=sessions` | the recipe default |
-| `GR8_STOP_GRACE` | docker's stop grace period | `150s` |
+| `KV_STORE` | `ssd:<dir>,size=200G,persist=on,keep=sessions` | off (opt-in tier; commented in `.env.example`) |
+| `CONC` | `1`, `2`, `4`, `8`: sessions at once; sets `SESS` and `CAP` from `conc.tsv` | `4` |
+| `BUSY` | `1`: the busy guard (needs an image with it) | `0` |
+| `ATTIC` | `1`: spark-attic memory lending (needs spark-attic on every box) | `0` |
+| `GR8_STOP_GRACE` | docker's stop grace period, needed with `KV_STORE` | off (`150s` with the store) |
 | `MENTAT` | `0`: the boxes in `PEERS`. `1`: find the boxes through the host's `mentat` daemon and register the API | `0` |
 | `GROUP` | the `mentat` group | `gr8-glm53-4x` |
 | `GR8_IMAGE` | the pinned image, read by compose | `ghcr.io/kindlingai/gr8:sha-e231adb` |
@@ -175,15 +218,17 @@ converted copy, so each box downloads and converts its own rank part. Never copy
 | what you see | what to do |
 |---|---|
 | `PEERS=...: want the four boxes' LAN addresses, head first, the same on every box (or MENTAT=1)` | set `PEERS` to four addresses, the same list on every box, or `MENTAT=1` |
-| `TUNE=...: want quality ..., speed ... or context ...` | use one of the three values |
+| `TUNE=...: want quality ...` | use one of `quality`, `speed`, `context`, `agents`, `agents-fast` |
 | a box never joins | start all four within 600 s; check that `PEERS` and every other knob are the same on every box, head first, and that ports 7340 and 7341 are open |
 | `fetch: .env sets MODEL=..., but this recipe pins ...` | `.env` moves off the measured commit: change the pin in `fetch` and `.env` together, and re-measure before publishing numbers |
-| `./glm53 check-env` or `./glm53 up` exits 2: `GR8_FOO=...: gr8 engine variables on their own line never reach the engine` | the UPDATE 2 rule: `GR8_*` knobs ride `EXTRA_ENV` only. Append `GR8_FOO=...` to the one `EXTRA_ENV` line, then `./glm53 up` again |
+| `./glm53 check-env` or `./glm53 up` exits 2: `GR8_FOO=...: gr8 engine variables on their own line never reach the engine` | the EXTRA_ENV rule: `GR8_*` knobs ride `EXTRA_ENV` only. Append `GR8_FOO=...` to the one `EXTRA_ENV` line, then `./glm53 up` again |
 | exit 2: `NAME is set twice` | keep one line for it (the last one wins, so a second `EXTRA_ENV` line silently replaces the first); put every engine variable on the one `EXTRA_ENV` line |
 | `./glm53 up` or `./glm53 check-config` exits 3: `MISSING: NAME=value` | the boot is not running what `.env` says (a misspelled name, a value gr8 rewrote, an `EXTRA_ENV` word it dropped). Fix `.env`, `./glm53 down`, `./glm53 up` |
 | `./glm53 up` exits 4: the container restarted within 120 s | it is stopped already, and the engine's error from `out/supervisor.log` is printed above (2026-11-08 on this rig: `GR8_MOE_TOPK is a Flash-model option`). Remove or fix that option, `./glm53 down` on every box, then `./glm53 up` on all four. `./glm53 error` prints the error again |
 | `gr8 glm53 down` fails: `container ... is restarting, wait until the container is running` | a refused option left the container restart-looping: `./glm53 down` on each box stops the loop and prints the engine's error |
-| docker kills the engine during a stop, the next boot loses chats | `GR8_STOP_GRACE=150s` is missing: `.env` must set it with `KV_STORE=ssd:...,persist=on,keep=sessions` (compose reads it for `stop_grace_period`) |
+| docker kills the engine during a stop, the next boot loses chats (SSD store on) | `GR8_STOP_GRACE=150s` is missing: uncomment it together with `KV_STORE` (compose reads it for `stop_grace_period`) |
+| `BUSY=1 needs an image with the busy guard` | the pinned image has no guard: build gr8 with it (README.md, "The busy guard") and set `GR8_IMAGE`, or set `BUSY=0` |
+| clients see HTTP 429 with `Retry-After` | `BUSY=1` is working: a live session's cache was protected. Clients should retry after the given seconds |
 | the image does not pull | build the thin recipe image on the box: `./glm53 up --build` (it is gr8's pinned image plus `knobs.sh`) |
 | a rank failed | every box's container exits non-zero and restarts, and the boxes boot again together; read the failing box's `./glm53 error` and `docker compose logs`, and, while it runs, `./glm53 logs supervisor` |
 
