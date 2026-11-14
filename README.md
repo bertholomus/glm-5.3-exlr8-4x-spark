@@ -140,7 +140,7 @@ refusal is decided at intake: a fresh arrival that would evict a live run is ans
 waits in the queue (a grant-time check stays as a backstop; when the queue is saturated a backstop refusal can
 still wait long — see the numbers).
 
-The rule was proposed by Matt (mmastrac, KindlingAI): "evict a session that is idle for > N s; if none are idle
+The rule was proposed by Matt Mastracci ([@mmastrac](https://x.com/mmastrac), KindlingAI): "evict a session that is idle for > N s; if none are idle
 then 429".
 
 Turn it on with `BUSY=1` (and `BUSY_IDLE_SECS` / `BUSY_RETRY_AFTER` / `BUSY_QUEUE_MAX` if you want other values).
@@ -309,12 +309,11 @@ costs and buys, measured on this rig with `keep=all` on gr8 `a555ee2`:
 - Writes: **about 150 GB/h a box** during the stop drains — real SSD wear and a longer stop.
 - Buy: **30/30 follow-up turns warm** (a chat's next turn after the stop restored its KV instead of re-prefilling).
 
-Credit where the store comes from: the tiered KV store is Matt's (mmastrac — the store and its tier design,
-kindlingai/gr8 #32, #36, #37, #40, #131, #239, #349), and the persist=on SSD store and the session keep it runs on
-are Chuck's (@chuck-ads, @adapt-ai-systems — kindlingai/gr8 #397 (persist=on + keep=sessions with the quit drain),
-#417, #145, #118).
+Credit where the store comes from: the tiered KV store and its tier design are by Matt Mastracci ([@mmastrac](https://x.com/mmastrac)) (kindlingai/gr8
+#32, #36, #37, #40, #131, #239, #349). The persist=on SSD store and the session keep it runs on are by Chuck ([@ck2084](https://x.com/ck2084), KindlingAI; GitHub [chuck-ads](https://github.com/chuck-ads) / [adapt-ai-systems](https://github.com/adapt-ai-systems))
+(kindlingai/gr8 #397 (persist=on + keep=sessions with the quit drain), #417, #145, #118).
 
-Honest base note: those two measured numbers ran `keep=all` on gr8 `a555ee2`. Chuck's newer store work is **not**
+Honest base note: those two measured numbers ran `keep=all` on gr8 `a555ee2`. The newer store work by Chuck ([@ck2084](https://x.com/ck2084)) is **not**
 in that base — #484 (keep=sessions writes only new page blocks and preallocates the SSD reserve), #498, #500 and
 #501 came after it — so the write rate on a current gr8 build should be lower, but it is **not measured** on this
 rig and we do not claim it. On gr8 `a555ee2`, `keep=sessions` (the line above) wrote less than `keep=all` but
@@ -323,11 +322,11 @@ evicted run.
 
 ## Credits
 
-- **Matt ([@mmastrac](https://github.com/mmastrac), KindlingAI)** — the tiered KV store and its tier design
+- **Matt Mastracci** ([@mmastrac](https://x.com/mmastrac), KindlingAI; GitHub [mmastrac](https://github.com/mmastrac)) — the tiered KV store and its tier design
   (kindlingai/gr8 #32, #36, #37, #40, #131, #239, #349), and the busy-guard rule this recipe's `BUSY=1` builds on
   ("evict a session that is idle for > N s; if none are idle then 429").
-- **Chuck ([@chuck-ads](https://github.com/chuck-ads), [@adapt-ai-systems](https://github.com/adapt-ai-systems))**
-  — the persist=on SSD KV store and the session keep it runs on (kindlingai/gr8 #397, #417, #145, #118).
+- **Chuck** ([@ck2084](https://x.com/ck2084), KindlingAI; GitHub [chuck-ads](https://github.com/chuck-ads) /
+  [adapt-ai-systems](https://github.com/adapt-ai-systems)) — the persist=on SSD KV store and the session keep it runs on (kindlingai/gr8 #397, #417, #145, #118).
 
 ## CI
 
@@ -340,7 +339,7 @@ a stand-in docker (`tests/fake-docker`) and a show-config fixture in gr8's real 
 
 - `TUNE=context` on this rig: the int4 knobs come from gr8's KV4.md trade, not from our rows.
 - The SSD KV store tier's write rate on a current gr8 build: our measured numbers ran `keep=all` on gr8
-  `a555ee2` (see ["Switching"](#switching-and-the-ssd-kv-store-tier-opt-in)); Chuck's newer store work (#484,
+  `a555ee2` (see ["Switching"](#switching-and-the-ssd-kv-store-tier-opt-in)); the newer store work by Chuck ([@ck2084](https://x.com/ck2084)) (#484,
   #498, #500, #501) postdates that base and is not measured on this rig.
 - bit275's KL against the full-precision model: no KL card yet.
 - CONC 1-8 with `ATTIC=0`: memory, cache size and quality measured; C4/C8 aggregate speed not measured.
