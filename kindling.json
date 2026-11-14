@@ -1,8 +1,12 @@
 {
-  "version": 1,
+  "version": 2,
   "title": "GLM-5.3",
-  "variant": "exlr8 k2/k3/k4, bit275 width manifest (default) and home, CONC 1/2/4/8 dial, optional spark-attic, fp8 KV, MTP + DFlash2 drafting, gr8 TP=4",
-  "summary": "GLM-5.3 (full) on four DGX Sparks (GB10) with gr8 at TP=4: the kindlingai exlr8 release 9372b74d, home width manifest, fp8 KV, MTP + DFlash2 drafting, SSD KV persistence. Rows measured 2026-11-07 on three fresh boots, gr8 bench + RigMark, gr8 sha-e231adb.",
+  "variant": "exlr8 k2/k3/k4, bit275 width manifest (default) and home, CONC 1/2/4/8 dial, optional spark-attic, BUSY busy-guard toggle (opt-in), fp8 KV, MTP + DFlash2 drafting, opt-in SSD KV tier, gr8 TP=4",
+  "summary": "GLM-5.3 (full) on four DGX Sparks (GB10) with gr8 at TP=4: the kindlingai exlr8 release 9372b74d, home width manifest, fp8 KV, MTP + DFlash2 drafting, opt-in SSD KV persistence. Rows measured 2026-11-07 on three fresh boots, gr8 bench + RigMark, gr8 sha-e231adb.",
+  "changelog": [
+    "v2 (2026-11-13): BUSY=1 busy-guard toggle documented (refuses a request that would evict a live session's KV, HTTP 429 + Retry-After, decided at intake; needs a gr8 image with the guard — github.com/bertholomus/gr8 branch busy-guard until the PR merges into kindlingai/gr8). Settings standard documented (layers, ./glm53 install, DRY_RUN). The SSD KV store becomes an opt-in tier (off by default); its measured numbers (~150 GB/h a box writes, 30/30 follow-up turns warm) ran keep=all on gr8 a555ee2 and are not re-measured on newer gr8 store work (#484, #498, #500, #501).",
+    "v1 (2026-11-11): public release prep of the bit275 recipe (scrub, MIT licence, d05aaec)."
+  ],
   "model": "kindlingai/glm-5.3-exlr8-k2-k3-k4",
   "hardware": "DGX Spark (GB10) x4, 200G switch fabric",
   "stack": [
@@ -11,7 +15,8 @@
     "fp8 KV",
     "MTP",
     "DFlash2",
-    "SSD KV persist"
+    "SSD KV persist (opt-in)",
+    "busy guard (opt-in)"
   ],
   "default_config": "quality",
   "configs": [

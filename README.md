@@ -5,10 +5,25 @@
 [gr8](https://github.com/kindlingai/gr8) from the kindlingai exlr8 release
 [`glm-5.3-exlr8-k2-k3-k4`](https://huggingface.co/kindlingai/glm-5.3-exlr8-k2-k3-k4): our bit275 width manifest (about
 2.75 bits per routed weight), a concurrency dial (`CONC=1|2|4|8`), optional spark-attic memory lending, fp8 KV,
-MTP + DFlash2 drafting, and a persistent SSD KV store so a stop keeps open chats for the next boot.
+MTP + DFlash2 drafting, and an opt-in persistent SSD KV store so a stop can keep open chats for the next boot.
 
 **Default:** `VARIANT=bit275` at `CONC=4`. Every number in this README is our measurement on four DGX Sparks, or is
 marked as someone else's. Nothing unmeasured is presented as measured; "What is not measured yet" lists the gaps.
+
+## What is new in v2
+
+- **The busy guard, `BUSY=1`** (off by default): an incoming request that would evict a retained session's KV cache
+  is refused at once with HTTP 429 + `Retry-After` instead of silently evicting it or queueing it in silence, so
+  agents on the lane stop going quiet for minutes behind a re-prefill. See ["The busy guard"](#the-busy-guard-busy1).
+  Needs a gr8 engine with the guard (see that section for the build until it merges upstream).
+- **The settings standard** (shipped since its commit, now documented here): settings resolve in layers — exported
+  environment > `scripts/local.sh` > `.env` (literal, never executed) > the `knobs.sh` defaults — with
+  `./glm53 install` for a fresh set of boxes and `DRY_RUN=1` to print any plan without running it. See
+  ["Settings"](#settings-the-layers-install-and-dry_run).
+- **The SSD KV store is now an opt-in tier** (off by default): a stop writes open chats to the SSD and the next
+  boot restores them. Its measured cost is in ["Switching"](#switching-and-the-ssd-kv-store-tier-opt-in); turn it
+  on by uncommenting two lines in `.env.example`.
+- Version bumped to 2 in `kindling.json`.
 
 ## Measured: the `home` baseline (2026-11-07)
 
@@ -112,6 +127,43 @@ document or task again right after the first answer, so the second request is a 
 | quality panel (12 Python tasks, temp 0) | 12/12 on two boots; 12/12 with each task re-asked as a pool hit |
 | warm hit against a cold prefill: four two-turn chats (~5,300-token prompts), turn 2's 64-token reply re-done cold | 2 of 4 replies differ, 59 and 69 characters in; 3 of 4 on a second boot. The differences are other wording or other items, not broken text |
 
+## The busy guard (`BUSY=1`)
+
+On a lane where several agents share the four boxes, one agent's big cold prefill used to evict another agent's
+retained KV cache: the victim's next turn re-prefilled its whole prompt and the agent went quiet for minutes. The
+busy guard (gr8's `GR8_BUSY_*` knobs, opt-in) answers that arrival instead of evicting: when granting a request
+would evict a retained run whose session is not idle (no request in flight and its last response ended under
+`BUSY_IDLE_SECS` ago, default 60), the head refuses it at once with HTTP 429, an OpenAI-shaped error body and
+`Retry-After` (`BUSY_RETRY_AFTER`, default 60) — the client retries after the gap. `BUSY_QUEUE_MAX` (default 8)
+refuses arrivals past that queue depth. A turn that continues its own retained run is never refused, and the
+refusal is decided at intake: a fresh arrival that would evict a live run is answered in under a second, before it
+waits in the queue (a grant-time check stays as a backstop; when the queue is saturated a backstop refusal can
+still wait long — see the numbers).
+
+The rule was proposed by Matt (mmastrac, KindlingAI): "evict a session that is idle for > N s; if none are idle
+then 429".
+
+Turn it on with `BUSY=1` (and `BUSY_IDLE_SECS` / `BUSY_RETRY_AFTER` / `BUSY_QUEUE_MAX` if you want other values).
+`BUSY=1` needs `GR8_IMAGE` to name an image **with** the guard: the pinned `ghcr.io/kindlingai/gr8:sha-e231adb`
+does not have it and the boot is refused with the fix named. Build gr8 from
+[github.com/bertholomus/gr8, branch `busy-guard`](https://github.com/bertholomus/gr8/tree/busy-guard) until the
+busy-guard PR merges into kindlingai/gr8; the guard is off by default upstream, so an image that merely contains
+it behaves exactly as before until you set `BUSY=1`.
+
+Measured on this rig (four DGX Sparks, GLM-5.3 bit275, 6 agents x ~130K tokens x multiple turns, `BUSY=1` vs
+`BUSY=0`, same boot count):
+
+| row | guard off | guard on |
+|---|---|---|
+| warm first token, p50 / p90 (a returning turn after the guard refused an unrelated arrival) | 359 s / 423 s (the run was evicted; the turn re-prefilled ~130K tokens) | **6.9 s / 13.7 s** |
+| intake-path refusals, client-measured max | n/a (no refusals) | **0.449 s** (samples 0.087-0.449 s) |
+| live evictions (a retained run lost while its session was inside the idle window) | the eviction is the behaviour | **0**; follow-up turns hit the pool 50/50 |
+| quality panel / boot smoke | 12/12 | 12/12 |
+
+The grant-path backstop is honest about its limit: with 10 x 130K-token agents against a ~413K-row pool the head
+sat saturated for ~7 minutes and backstop refusals carried waits up to 416 s. That is the queue-capacity behaviour
+of the backstop, reported separately from the intake path, which stayed sub-second throughout.
+
 ## Knobs
 
 | knob | values | default |
@@ -125,10 +177,14 @@ document or task again right after the first answer, so the second request is a 
 | `SESS` | requests decoding at once, 1-8 | set by `CONC` (4) |
 | `CONC` | `1`, `2`, `4`, `8`: the concurrency dial. Sets `SESS` and lets `CAP` follow the largest CAP a boot at that SESS measured holding the serving floor (9 GiB free at ready, never under 8 GiB under load) — fewer slots, more KV cache per session (`./glm53 conc` prints the measured table for your `VARIANT`, split by the `attic` column). A `CAP` you set keeps your value; one above the measured value warns (it is not refused). A pair with no measured row falls back to `SESS=CONC` and the `TUNE`'s `CAP`, with a stderr line | `4` |
 | `ATTIC` | `1`: boot with the memory-reserve layer ([spark-attic](https://github.com/bertholomus/spark-attic)) lending each rank its display-carveout slice (`compose.attic.yaml` is added to the compose files, and the `CONC` rows with `attic on` apply). Needs `GR8_IMAGE` to name an image **with** the attic client — the pinned `ghcr.io/kindlingai/gr8:sha-e231adb` has none and `ATTIC=1` is refused with the fix named. The gr8 attic client is not in a published gr8 image yet: `ATTIC=1` needs a gr8 build that includes it | `0` |
+| `BUSY` | `1`: the busy guard. When granting a request would evict a retained run whose session is not idle (no request in flight and its last response ended under `BUSY_IDLE_SECS` ago, default 60), the head refuses it at once with HTTP 429, an OpenAI-shaped error body and `Retry-After` (`BUSY_RETRY_AFTER`, default 60) — instead of evicting the run (that agent then sits out a full re-prefill, minutes of silence) or queueing the request in silence. `BUSY_QUEUE_MAX` (default 8) refuses arrivals past that queue depth. A turn that continues its own retained run is never refused. Needs `GR8_IMAGE` to name an image **with** the busy guard (a gr8 build of the busy-guard branch); the pinned image has none and `BUSY=1` is refused with the fix named | `0` |
+| `BUSY_IDLE_SECS` | `BUSY=1`: a session counts as idle when it has no request in flight and its last response ended at least this many seconds ago; only idle sessions' retained runs are evicted. Tune it from your agents' tool-call gaps | gr8's 60 |
+| `BUSY_RETRY_AFTER` | `BUSY=1`: the seconds in a refused request's `Retry-After` header and error body | gr8's 60 |
+| `BUSY_QUEUE_MAX` | `BUSY=1`: a request arriving while this many requests are already queued is refused at once instead of joining the queue; 0 = no bound | gr8's 8 |
 | `CAP` | the KV pool in tokens, shared by the sessions, a multiple of 64 | by `TUNE` (485376; 513536 with int4 KV) |
 | `SHARE_LIMIT` | requests up to this many tokens (prompt + max_tokens) share decode steps; every rank holds a session's first `SHARE_LIMIT` tokens and a share of the rest. A multiple of 64 from 4096 | by `TUNE` (gr8's 32768; 16384 with `TUNE=agents` and `agents-fast`) |
-| `KV_STORE` | `ssd:<dir>,size=200G,persist=on,keep=sessions`: at an orderly stop the engine writes open chats to the SSD; the next boot restores their KV | the recipe default, in `.env.example` |
-| `GR8_STOP_GRACE` | docker's stop grace, read by `compose.yaml` | `150s` with the SSD KV store, or docker kills the engine mid-store |
+| `KV_STORE` | `ssd:<dir>,size=200G,persist=on,keep=sessions`: at an orderly stop the engine writes open chats to the SSD; the next boot restores their KV. An **opt-in tier** in v2 | off by default; uncomment the two lines in `.env.example` (see ["Switching"](#switching-and-the-ssd-kv-store-tier-opt-in)) |
+| `GR8_STOP_GRACE` | docker's stop grace, read by `compose.yaml` | `150s` — set it when the SSD KV store tier is on, or docker kills the engine mid-store |
 | `MENTAT` | `0`: the boxes in `PEERS`. `1`: find the boxes through the host's `mentat` daemon and register the API in group `GROUP` | `0` |
 | `GR8_IMAGE` | the pinned image, read by `compose.yaml` | `ghcr.io/kindlingai/gr8:sha-e231adb` |
 | `MODEL`, `DRAFTER` | the release and the drafter, each pinned to a Hugging Face commit | the commits measured above (`./fetch --print` prints them) |
@@ -139,6 +195,38 @@ document or task again right after the first answer, so the second request is a 
 `engine.env`; `-e EXTRA_ENV=GR8_MOE_TOPK=6` did). Append new `GR8_*` knobs to the one `EXTRA_ENV` line,
 space-separated, never replacing what is there. Short launcher names (`SESS`, `CAP`, `KV_FORMAT`, `DFLASH_K`, ...)
 stay plain `.env` lines.
+
+## Settings: the layers, install and DRY_RUN
+
+Settings resolve in layers, later never beats earlier:
+
+1. **The exported environment** — `TUNE=agents CONC=4 ./glm53 up` wins over everything below, even over an export of
+   the same name inside `scripts/local.sh`.
+2. **`scripts/local.sh`** — trusted Bash, sourced; computed settings belong here. Gitignored; copy
+   `scripts/local.sh.example` to start.
+3. **`.env`** — read as literal `KEY=value` lines, **never executed** (a `$(...)` line is stored as text). Compose
+   also passes it into the container, where the gr8 launcher reads it.
+4. **The defaults** in `knobs.sh` (and `conc.tsv` for the dial), each documented in the table above.
+
+Every knob in the table above can be set in any layer. The shipped `.env.example` turns nothing optional on:
+`BUSY=0` and `ATTIC=0` are the defaults, and the SSD KV store tier ships commented (off). `check-env`,
+`check-config` and `./glm53 conc` keep reading `.env` directly: their contract is what `.env` says.
+
+**Install** — one command for a fresh set of four boxes, run from the recipe folder on the head:
+
+```
+./glm53 install          # this box, then the other three over ssh (INSTALL_PEER_DIR, INSTALL_SSH_USER)
+./glm53 install --this-box   # only this box
+DRY_RUN=1 ./glm53 install    # print the per-box plan, run nothing
+```
+
+It checks docker on the box, writes `.env` from `.env.example` only when `.env` is missing (never overwrites a file
+you have), runs `check-env`, pulls the pinned `GR8_IMAGE` when the image is absent (a locally built image is named,
+not pulled — build or copy it first), and checks the weights cache and the `MODEL`/`DRAFTER` pins (`./fetch
+--check`).
+
+**DRY_RUN** — `DRY_RUN=1 ./glm53 up` (and `install`) prints the whole plan — the layered settings, the exact compose
+command, the per-box steps — and changes nothing.
 
 ## Quickstart
 
@@ -168,8 +256,8 @@ On the head:
 curl -s localhost:8100/health # {"ready":true,...} when the API serves
 ```
 
-The API is OpenAI-compatible on the head's port 8100, model name `glm-5.3`. To stop and start again (the SSD KV
-store keeps open chats across the stop; `GR8_STOP_GRACE=150s` gives the store time to write):
+The API is OpenAI-compatible on the head's port 8100, model name `glm-5.3`. To stop and start again (with the SSD
+KV store tier on, a stop keeps open chats across the stop; `GR8_STOP_GRACE=150s` gives the store time to write):
 
 ```bash
 ./glm53 down                  # on any box: stops every box, containers exit 0 and stay down
@@ -199,18 +287,47 @@ store keeps open chats across the stop; `GR8_STOP_GRACE=150s` gives the store ti
 `./glm53 up --build` builds the thin recipe image first (gr8's pinned image plus `knobs.sh`), for a box that cannot
 pull it. `./glm53 status|smoke|health|show-config|logs` run `gr8 glm53 <command>` in this box's container.
 
-## Switching
+## Switching and the SSD KV store tier (opt-in)
 
-`KV_STORE=ssd:...,persist=on,keep=sessions` + `GR8_STOP_GRACE=150s` and
-`EXTRA_ENV=GR8_GEN_CACHE=/var/lib/gr8/cache/gen-cache` are the fast-switching settings of gr8's
-[SWITCHING.md](https://github.com/kindlingai/gr8/blob/main/docs/SWITCHING.md): at the stop each rank stores its open
-chats on the SSD (45-194 ms per rank measured there, 2026-11-07), and the next boot reads the store's index back, so
-a chat's next turn restores its KV instead of a prefill. The store and the gen cache live in the cache volume
-(`/var/lib/gr8/cache/kv`, `/var/lib/gr8/cache/gen-cache`).
+gr8's [SWITCHING.md](https://github.com/kindlingai/gr8/blob/main/docs/SWITCHING.md) fast-switching settings are
 
-This recipe needs no separate `kv-store.yaml`: the SSD store is one `KV_STORE` line (gr8's inline form). The 2-box
-Flash recipe's `kv-store.yaml` file is the Flash prompt-cache form (`FLASH_CACHE=aligned`), which the full GLM-5.3
-recipe does not use.
+```
+KV_STORE=ssd:/var/lib/gr8/cache/kv,size=200G,persist=on,keep=sessions
+GR8_STOP_GRACE=150s
+```
+
+At the stop each rank stores its open chats on the SSD (45-194 ms per rank measured in gr8's SWITCHING.md,
+2026-11-07), and the next boot reads the store's index back, so a chat's next turn restores its KV instead of a
+prefill. The store and the gen cache live in the cache volume (`/var/lib/gr8/cache/kv`,
+`/var/lib/gr8/cache/gen-cache`). This recipe needs no separate `kv-store.yaml`: the SSD store is one `KV_STORE`
+line (gr8's inline form). The 2-box Flash recipe's `kv-store.yaml` file is the Flash prompt-cache form
+(`FLASH_CACHE=aligned`), which the full GLM-5.3 recipe does not use.
+
+**The tier is off by default in v2** (the two lines ship commented in `.env.example`; uncomment both). What it
+costs and buys, measured on this rig with `keep=all` on gr8 `a555ee2`:
+
+- Writes: **about 150 GB/h a box** during the stop drains — real SSD wear and a longer stop.
+- Buy: **30/30 follow-up turns warm** (a chat's next turn after the stop restored its KV instead of re-prefilling).
+
+Credit where the store comes from: the tiered KV store is Matt's (mmastrac — the store and its tier design,
+kindlingai/gr8 #32, #36, #37, #40, #131, #239, #349), and the persist=on SSD store and the session keep it runs on
+are Chuck's (@chuck-ads, @adapt-ai-systems — kindlingai/gr8 #397 (persist=on + keep=sessions with the quit drain),
+#417, #145, #118).
+
+Honest base note: those two measured numbers ran `keep=all` on gr8 `a555ee2`. Chuck's newer store work is **not**
+in that base — #484 (keep=sessions writes only new page blocks and preallocates the SSD reserve), #498, #500 and
+#501 came after it — so the write rate on a current gr8 build should be lower, but it is **not measured** on this
+rig and we do not claim it. On gr8 `a555ee2`, `keep=sessions` (the line above) wrote less than `keep=all` but
+restored fewer follow-up turns (a chat whose turn-1 run was evicted is not covered); `keep=all` covers every
+evicted run.
+
+## Credits
+
+- **Matt ([@mmastrac](https://github.com/mmastrac), KindlingAI)** — the tiered KV store and its tier design
+  (kindlingai/gr8 #32, #36, #37, #40, #131, #239, #349), and the busy-guard rule this recipe's `BUSY=1` builds on
+  ("evict a session that is idle for > N s; if none are idle then 429").
+- **Chuck ([@chuck-ads](https://github.com/chuck-ads), [@adapt-ai-systems](https://github.com/adapt-ai-systems))**
+  — the persist=on SSD KV store and the session keep it runs on (kindlingai/gr8 #397, #417, #145, #118).
 
 ## CI
 
@@ -222,6 +339,9 @@ a stand-in docker (`tests/fake-docker`) and a show-config fixture in gr8's real 
 ## What is not measured yet
 
 - `TUNE=context` on this rig: the int4 knobs come from gr8's KV4.md trade, not from our rows.
+- The SSD KV store tier's write rate on a current gr8 build: our measured numbers ran `keep=all` on gr8
+  `a555ee2` (see ["Switching"](#switching-and-the-ssd-kv-store-tier-opt-in)); Chuck's newer store work (#484,
+  #498, #500, #501) postdates that base and is not measured on this rig.
 - bit275's KL against the full-precision model: no KL card yet.
 - CONC 1-8 with `ATTIC=0`: memory, cache size and quality measured; C4/C8 aggregate speed not measured.
 - A clean-boot switch timing GLM-5.3 ↔ another model on this recipe.

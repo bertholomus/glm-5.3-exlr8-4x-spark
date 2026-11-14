@@ -1,4 +1,5 @@
 .env
+scripts/local.sh
 .env.discard
 tests/.smoke-run-*
 *.json.tmp

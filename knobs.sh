@@ -34,6 +34,12 @@
 #             box's fabric address on the first and second ConnectX root, in PEERS order). Nothing is announced.
 #   MENTAT=1: find the other boxes through the host's mentat daemon (gr8's MENTAT=localhost) and announce the API in
 #             the mentat cluster, in group GROUP (gr8-glm53-4x by default, so the cluster never joins another one).
+# Settings layers (scripts/config.sh): the exported environment > scripts/local.sh > .env > the defaults below.
+# Inside the container compose already exported .env's lines, so the layers only ever widen what a host-side
+# scripts/local.sh can set; an exported variable always wins.
+_c=$(dirname "${BASH_SOURCE[0]}")/scripts/config.sh
+[ -f "$_c" ] && . "$_c"
+unset _c
 AGENTS_FAST_WARNING="WARNING: TUNE=agents-fast sets GR8_REUSE_ALIGN=0: not bit-exact against a cold prefill (gr8 \
 SETTINGS.md). A warm turn can get other temp-0 text than the same request sent cold. TUNE=agents keeps exact output."
 
@@ -88,6 +94,30 @@ unset AGENTS_FAST_WARNING
 export VARIANT SESS CAP
 [ -z "${SHARE_LIMIT:-}" ] || export SHARE_LIMIT
 [ -z "${KV_FORMAT:-}" ] || export KV_FORMAT
+# BUSY=0|1 (default 0): the busy guard (gr8 docs/ENV.md GR8_BUSY_*). 1 = when granting a request would evict a
+# retained run whose session is not idle (no request in flight and its last response ended under BUSY_IDLE_SECS
+# ago, default 60), the head refuses it at once with HTTP 429 + Retry-After (BUSY_RETRY_AFTER, default 60) instead
+# of evicting the run or queueing it in silence; BUSY_QUEUE_MAX (default 8) refuses arrivals past that queue depth.
+# A turn that continues its own retained run is never refused. BUSY=1 needs GR8_IMAGE to name an image **with** the
+# busy guard (a gr8 build of the busy-guard branch): the pinned ghcr.io/kindlingai/gr8:sha-e231adb has none and
+# BUSY=1 is refused here, before any boot, with the fix named.
+busy_words=""
+case "${BUSY:-0}" in
+  0) ;;
+  1)
+    case "${GR8_IMAGE:-}" in
+      *busy*) ;;
+      *) echo "BUSY=1 needs an image with the busy guard (GR8_IMAGE=${GR8_IMAGE:-ghcr.io/kindlingai/gr8:sha-e231adb} has none; e.g. GR8_IMAGE=gr8:busy-guard, a gr8 build with the busy guard), and GR8_BUSY_* ride EXTRA_ENV" >&2; exit 2 ;;
+    esac
+    busy_words="GR8_BUSY_GUARD=1"
+    [ -n "${BUSY_IDLE_SECS:-}" ] && busy_words="$busy_words GR8_BUSY_IDLE_SECS=$BUSY_IDLE_SECS"
+    [ -n "${BUSY_RETRY_AFTER:-}" ] && busy_words="$busy_words GR8_BUSY_RETRY_AFTER=$BUSY_RETRY_AFTER"
+    [ -n "${BUSY_QUEUE_MAX:-}" ] && busy_words="$busy_words GR8_BUSY_QUEUE_MAX=$BUSY_QUEUE_MAX"
+    unset BUSY_IDLE_SECS BUSY_RETRY_AFTER BUSY_QUEUE_MAX
+    ;;
+  *) echo "BUSY=${BUSY}: want 0 (off, the default) or 1 (the busy guard refuses what would evict a live session; needs an image with the guard)" >&2; exit 2 ;;
+esac
+
 # Tier words that are GR8_* engine variables ride EXTRA_ENV (UPDATE 2, Kindling 2026-11-07: a plain GR8_*=... line is
 # dropped by the launcher). TUNE=agents-fast adds GR8_REUSE_ALIGN=0. An
 # EXTRA_ENV already in the environment is kept verbatim, after the tier's words (no leading space added when the tier
@@ -96,9 +126,9 @@ tier_gr8_words=""
 case "${TUNE:-quality}" in
   agents-fast) tier_gr8_words="GR8_REUSE_ALIGN=0" ;;
 esac
-export EXTRA_ENV="${attic_words:+$attic_words }${tier_gr8_words:+$tier_gr8_words }${EXTRA_ENV:-}"
+export EXTRA_ENV="${busy_words:+$busy_words }${attic_words:+$attic_words }${tier_gr8_words:+$tier_gr8_words }${EXTRA_ENV:-}"
 export EXTRA_ENV="${EXTRA_ENV% }"
-unset tier_gr8_words attic_words
+unset tier_gr8_words attic_words busy_words
 case "${MENTAT:-0}" in
   0) unset MENTAT
      n=$(tr , '\n' <<< "${PEERS:-}" | grep -c .) || true

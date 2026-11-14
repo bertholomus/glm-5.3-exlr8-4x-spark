@@ -12,7 +12,14 @@
 #                                check-env, docker compose up -d (--build: build the thin recipe image first), then
 #                                watch this box's container for 120 s: if it restarts (bad options, a refused engine
 #                                option, ...) it is stopped cleanly and the engine's own error from out/supervisor.log
-#                                is printed (exit 4). Then check-config
+#                                is printed (exit 4). Then check-config. DRY_RUN=1 prints the whole plan (the
+#                                layered settings, the compose command, the watch) and changes nothing
+#   ./glm53 install [--this-box]  a fresh set of four boxes: on THIS box (and, without --this-box, over ssh on the
+#                                other three, same recipe path: INSTALL_PEER_DIR, user INSTALL_SSH_USER): checks
+#                                docker, writes .env from .env.example when it is missing (never overwrites),
+#                                check-env, pulls the pinned GR8_IMAGE when absent (a local image is named, not
+#                                pulled), checks the weights cache and the MODEL/DRAFTER pins (./fetch --check).
+#                                DRY_RUN=1 prints the per-box plan and runs nothing
 #   ./glm53 check-config [--from FILE]
 #                                every knob .env sets shows in `gr8 glm53 show-config` with the value set; one that
 #                                does not is an error (exit 3). --from checks a saved show-config output instead
@@ -34,6 +41,10 @@
 # GLM53_NOT_CHECKED (more names for check-config to skip), DOCKER (docker).
 set -euo pipefail
 cd "$(dirname "$0")"
+# the settings layers (scripts/config.sh): the exported environment > scripts/local.sh > .env > the defaults below.
+# check-env, check-config and conc keep reading $ENV_FILE directly: their contract is what .env says; the layered
+# view feeds up's DRY_RUN plan and install.
+. ./scripts/config.sh
 
 CONTAINER=glm53-4x-spark                                   # compose.yaml container_name
 ENV_FILE=${GLM53_ENV_FILE:-.env}
@@ -228,6 +239,17 @@ cmd_up() {
     # the client — knobs.sh refused ATTIC=1 on the pinned image before this file was written)
     args=(-f compose.yaml -f compose.attic.yaml "${args[@]}")
   fi
+  if [ "${DRY_RUN:-0}" = 1 ]; then
+    echo "DRY_RUN: ./glm53 up on this box would:"
+    echo "  image: ${GR8_IMAGE:-"compose.yaml default"}"
+    echo "  settings: TUNE=${TUNE:-quality} CONC=${CONC:-"unset: the dial runs in knobs.sh"} VARIANT=${VARIANT:-"the TUNE default"} ATTIC=${ATTIC:-0} BUSY=${BUSY:-0}"
+    echo "  EXTRA_ENV: ${EXTRA_ENV:-"empty"}"
+    echo "  boxes (PEERS): ${PEERS:-"unset"}"
+    echo "  command: docker compose ${args[*]}"
+    echo "  then: watch this box's container for ${WATCH_S}s (a restart is stopped with the engine's error), check-config"
+    echo "DRY_RUN: nothing was changed. Run without DRY_RUN=1 to do it."
+    return 0
+  fi
   cmd_check_env
   # a container ./glm53 stopped out of a restart loop has restart=no: recreate it with compose's restart policy
   if [ "$("$DOCKER" inspect -f '{{.HostConfig.RestartPolicy.Name}}' "$CONTAINER" 2>/dev/null || true)" = no ]; then
@@ -305,11 +327,91 @@ cmd_conc() {  # ./glm53 conc: the concurrency dial's measured table for the curr
   fi
   printf '%s\n' "$rows" | awk -F'\t' '{printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $2, $3, $4, $5, $6, $7, $8}'
 }
+install_box() {  # install_box <name> <dir> <remote|local>: one box's checks; prints what it did, returns 1 on a failure
+  local name=$1 dir=$2 how=$3 run=() bad=0 image
+  image=${GR8_IMAGE:-}
+  if [ "$how" = remote ]; then
+    run=(ssh "${INSTALL_SSH_USER:+$INSTALL_SSH_USER@}$name")
+    printf 'install %s (%s): ' "$name" "$dir"
+  else
+    printf 'install this box (%s): ' "$dir"
+  fi
+  if [ "${DRY_RUN:-0}" = 1 ]; then
+    echo "DRY_RUN: check docker; write .env from .env.example only if missing; ./glm53 check-env; image ${image:-"compose default"}: pull only if absent; ./fetch --check; weights cache ${GR8_CACHE:-/var/lib/gr8/cache} present"
+    return 0
+  fi
+  if [ "$how" = remote ]; then
+    if ! "${run[@]}" "cd '$dir' && [ -f .env ] || cp .env.example .env; ./glm53 check-env >/dev/null" ; then
+      echo "FAILED: ssh/check-env on $name" >&2
+      return 1
+    fi
+    if "${run[@]}" "cd '$dir' && docker image inspect '${image:-ghcr.io/kindlingai/gr8:sha-e231adb}' >/dev/null 2>&1"; then
+      printf 'image present; '
+    else
+      "${run[@]}" "cd '$dir' && docker pull '${image:-ghcr.io/kindlingai/gr8:sha-e231adb}'" || { echo "FAILED: image $image not pullable on $name (a local image: build or copy it there first, README)" >&2; return 1; }
+      printf 'image pulled; '
+    fi
+    if "${run[@]}" "cd '$dir' && test -d '${GR8_CACHE:-/var/lib/gr8/cache}' && ./fetch --check"; then
+      echo "weights cache present, pins ok"
+    else
+      echo "WEIGHTS: cache missing or pins off on $name: run ./fetch there" >&2
+      bad=1
+    fi
+    [ "$bad" = 0 ]
+  else
+    command -v docker >/dev/null || { echo "FAILED: docker not found" >&2; return 1; }
+    [ -f "$ENV_FILE" ] || { cp .env.example "$ENV_FILE"; echo "wrote $ENV_FILE from .env.example; "; }
+    cmd_check_env >/dev/null || { echo "FAILED: check-env" >&2; return 1; }
+    printf 'check-env ok; '
+    if [ -n "$image" ] && docker image inspect "$image" >/dev/null 2>&1; then
+      printf 'image present; '
+    elif [ -n "$image" ]; then
+      docker pull "$image" || { echo "FAILED: image $image not pullable (a local image: build or copy it here first, README)" >&2; return 1; }
+      printf 'image pulled; '
+    else
+      printf 'image: compose default; '
+    fi
+    if [ -d "${GR8_CACHE:-/var/lib/gr8/cache}" ] && ./fetch --check; then
+      echo "weights cache present, pins ok"
+    else
+      echo "WEIGHTS: cache missing or pins off: run ./fetch on this box" >&2
+      return 1
+    fi
+  fi
+}
+
+cmd_install() {  # ./glm53 install [--this-box]: the four boxes, or only this one
+  local a this=0
+  for a in "$@"; do
+    case "$a" in
+      --this-box) this=1 ;;
+      *) echo "install: unknown option $a (want --this-box)" >&2; return 1 ;;
+    esac
+  done
+  local dir=${INSTALL_PEER_DIR:-$(pwd)} rc=0
+  if [ "$this" = 1 ] || [ "${DRY_RUN:-0}" = 1 ] || [ -z "${PEERS:-}" ]; then
+    [ -n "${PEERS:-}" ] || echo "install: PEERS unset: installing this box only"
+    install_box "$(hostname)" "$(pwd)" local || rc=1
+    return "$rc"
+  fi
+  local peer head
+  head=${PEERS%%,*}
+  install_box "$(hostname)" "$(pwd)" local || rc=1
+  # this box's PEERS entry is its own address; the peers are the rest (head first in .env, this box anywhere)
+  local IFS=,
+  for peer in $PEERS; do
+    [ "$peer" = "$head" ] && [ "$peer" != "$(hostname -I 2>/dev/null | awk '{print $1}')" ] && continue
+    install_box "$peer" "$dir" remote || rc=1
+  done
+  return "$rc"
+}
+
 case "${1:-}" in
   check-env) cmd_check_env ;;
   conc) . ./conc_lookup.sh; cmd_conc ;;
   check-config) shift; cmd_check_config "$@" ;;
   up) shift; cmd_up "$@" ;;
+  install) shift; cmd_install "$@" ;;
   down) cmd_down ;;
   error) cmd_error ;;
   status|smoke|health|show-config|logs) exec "$DOCKER" compose exec -T gr8 gr8 glm53 "$@" ;;
