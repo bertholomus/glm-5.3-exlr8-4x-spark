@@ -8,7 +8,10 @@
 # sha256:d920e26b3105f9f56f7766121394da1e37fb93d82e2176e20f8c1c2e64f4f174 (measured 2026-11-07).
 ARG GR8_IMAGE=ghcr.io/kindlingai/gr8@sha256:d920e26b3105f9f56f7766121394da1e37fb93d82e2176e20f8c1c2e64f4f174
 FROM ${GR8_IMAGE}
-COPY knobs.sh entrypoint.sh /opt/glm53-4x/
+# Issue #1 (reported by Chuck, @adapt-ai-systems): knobs.sh sources conc_lookup.sh next to itself, and
+# conc_lookup.sh reads conc.tsv and manifests/ next to itself, so all of them are COPYed, or the CONC dial silently dies.
+COPY knobs.sh entrypoint.sh conc_lookup.sh conc.tsv /opt/glm53-4x/
+COPY manifests/ /opt/glm53-4x/manifests/
 COPY bin/gr8 /opt/glm53-4x/bin/gr8
 ENV PATH=/opt/glm53-4x/bin:$PATH
 ENTRYPOINT ["/opt/glm53-4x/entrypoint.sh"]

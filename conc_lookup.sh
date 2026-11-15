@@ -17,10 +17,14 @@
 
 conc_rows_for() {  # conc_rows_for VARIANT_KEY ATTIC(on|off): that key's rows for the attic setting
   # always exits 0 (an empty result is a normal answer; the caller decides)
-  local key=$1 attic=${2:-off} f mode
+  local key=$1 attic=${2:-off} f mode tsv
   [ "$attic" = 1 ] && mode=on || mode=off
-  [ -f conc.tsv ] || return 0
-  grep -v '^#' conc.tsv | grep -v '^[[:space:]]*$' \
+  # v2.1 (issue #1): the table sits next to this script (BASH_SOURCE), not in the caller cwd — in the built
+  # image the entrypoint runs knobs.sh from gr8's own workdir, and a cwd-relative look would silently see
+  # no rows (CONC then only sets SESS with the TUNE CAP). Same dir on a host checkout, so nothing moves.
+  tsv="$(dirname "${BASH_SOURCE[0]}")/conc.tsv"
+  [ -f "$tsv" ] || return 0
+  grep -v '^#' "$tsv" | grep -v '^[[:space:]]*$' \
     | awk -F'\t' -v k="$key" -v m="$mode" '$1 == k && $3 == m' || true
   return 0
 }

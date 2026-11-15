@@ -161,6 +161,30 @@ out=$(CONC=4 src_knobs TUNE=agents SESS= CAP= VARIANT=home)
 echo "$out" | grep -q 'SESS=4 CAP=776704' || fail "knobs.sh exported CONC beats local.sh: got: $out"
 echo "ok: knobs.sh dispatches TUNE=quality|context|agents|agents-fast (with its warning), defaults VARIANT=bit275 CONC=4, refuses bad values, reads scripts/local.sh under the exported environment"
 
+# Issue #1 (reported by Chuck, @adapt-ai-systems): the built image carries everything the boot path reads.
+# knobs.sh sources conc_lookup.sh next to itself; conc_lookup.sh reads conc.tsv and manifests/ next to itself
+# (BASH_SOURCE) — every referenced path must be COPYed by the Dockerfile or the CONC dial silently dies in it.
+copy_set=$(awk '/^COPY /{for(i=2;i<NF;i++) printf "%s\n", $i}' Dockerfile | sort -u)
+need_copied() { printf '%s\n' "$copy_set" | grep -qx "$1" || fail "Dockerfile does not COPY $1 (the boot path reads it; issue #1)"; }
+need_copied knobs.sh
+need_copied entrypoint.sh
+need_copied conc_lookup.sh
+need_copied conc.tsv
+need_copied manifests/
+need_copied bin/gr8
+# the completeness rule itself: every dirname-BASH_SOURCE reference in knobs.sh / conc_lookup.sh resolves
+# inside the COPY set (a file maps to itself; anything under manifests/ maps to the manifests/ COPY)
+for ref in $(grep -hoE 'dirname "\$\{BASH_SOURCE\[0\]\}\}/[A-Za-z0-9_./-]+' knobs.sh conc_lookup.sh \
+              | sed 's|.*}}/||' | sort -u); do
+  case "$ref" in
+    conc_lookup.sh) need_copied conc_lookup.sh ;;
+    manifests/*) printf '%s\n' "$copy_set" | grep -qx manifests/ || fail "Dockerfile does not COPY manifests/ ($ref; issue #1)" ;;
+    *) printf '%s\n' "$copy_set" | grep -qx "$ref" || fail "Dockerfile does not COPY $ref (the boot path reads it; issue #1)" ;;
+  esac
+done
+grep -q '\[ -f "\$tsv" \]' conc_lookup.sh || fail "conc_lookup.sh: the conc.tsv read is not BASH_SOURCE-relative (issue #1)"
+echo "ok: the Dockerfile COPYs every file the boot path reads (issue #1)"
+
 # 4. fetch --print / --check, on a scratch copy of .env.example (cp, never mv; the scratch .env stays in place)
 pins=$(./fetch --print)
 echo "$pins" | grep -q '^MODEL=https://huggingface.co/kindlingai/glm-5.3-exlr8-k2-k3-k4@9372b74d77e129ea063bc0934df1570fc3173469$' \
