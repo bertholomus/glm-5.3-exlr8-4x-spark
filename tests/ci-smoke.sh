@@ -70,11 +70,17 @@ out=$(src_knobs TUNE=context)
 echo "$out" | grep -q 'CAP=513536 KV_FORMAT=int4' || fail "knobs.sh TUNE=context: got: $out"
 out=$(src_knobs TUNE=quality SESS=8 CAP=485376)
 echo "$out" | grep -q 'VARIANT=bit275 SESS=8 CAP=485376' || fail "knobs.sh TUNE=quality SESS=8 CAP=485376: got: $out"
+# KV_FORMAT is explicit in every tier (issue #1): fp8 for quality and agents, a user value kept
+echo "$out" | grep -q 'KV_FORMAT=fp8 ' || fail "knobs.sh TUNE=quality: KV_FORMAT not fp8: $out"
+out=$(src_knobs TUNE=agents)
+echo "$out" | grep -q 'KV_FORMAT=fp8 ' || fail "knobs.sh TUNE=agents: KV_FORMAT not fp8: $out"
+out=$(src_knobs TUNE=quality KV_FORMAT=int4)
+echo "$out" | grep -q 'KV_FORMAT=int4 ' || fail "knobs.sh TUNE=quality KV_FORMAT=int4: user value not kept: $out"
 err=$(src_knobs TUNE=agents SESS=8 CAP=485376 2>&1 >/dev/null)
 [ -z "$err" ] || fail "knobs.sh TUNE=agents SESS=8 CAP=485376 prints: $err"
 # agents-fast: agents + GR8_REUSE_ALIGN=0 on EXTRA_ENV (before what is there), and the exactness warning on stderr
 out=$(src_knobs TUNE=agents-fast CAP=776704)
-echo "$out" | grep -q 'VARIANT=home SESS=4 CAP=776704 KV_FORMAT= SHARE_LIMIT=16384 EXTRA_ENV=GR8_REUSE_ALIGN=0$' \
+echo "$out" | grep -q 'VARIANT=home SESS=4 CAP=776704 KV_FORMAT=fp8 SHARE_LIMIT=16384 EXTRA_ENV=GR8_REUSE_ALIGN=0$' \
   || fail "knobs.sh TUNE=agents-fast: got: $out"
 out=$(src_knobs TUNE=agents-fast CAP=776704 EXTRA_ENV=GR8_GEN_CACHE=/x 2>/dev/null)
 echo "$out" | grep -q 'EXTRA_ENV=GR8_REUSE_ALIGN=0 GR8_GEN_CACHE=/x$' || fail "knobs.sh TUNE=agents-fast: EXTRA_ENV: $out"

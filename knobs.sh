@@ -27,6 +27,8 @@
 #             with each task re-asked as a pool hit; four two-turn chats (~5,300-token prompts) re-sent cold: 2 of the
 #             4 replies (64 tokens each) differ from the warm ones, 59 and 69 characters in (3 of 4 on a second boot).
 #
+# KV_FORMAT is set explicitly in every tier (fp8 except TUNE=context), so a gr8 pin whose unset default is int4 (gr8
+# v1.0 at TP=4) does not change a tier's KV format (issue #1).
 # A VARIANT, SESS, CAP, SHARE_LIMIT or KV_FORMAT set on its own keeps its value. EXTRA_ENV already in the environment
 # is kept, after anything this file adds (TUNE=agents-fast's GR8_REUSE_ALIGN=0; the speed slot's words when measured).
 #
@@ -80,11 +82,11 @@ case "${TUNE:-quality}" in
   quality)
     # the recipe default is the bit275 width manifest (it ships in manifests/ and
     # VARIANT=bit275 resolves to it); SESS/CAP/CONC follow the concurrency dial below
-    VARIANT=${VARIANT:-bit275} ;;
+    VARIANT=${VARIANT:-bit275} KV_FORMAT=${KV_FORMAT:-fp8} ;;
   context)
     VARIANT=${VARIANT:-home} SESS=${SESS:-8} CAP=${CAP:-513536} KV_FORMAT=${KV_FORMAT:-int4} ;;
   agents|agents-fast)
-    VARIANT=${VARIANT:-home} SESS=${SESS:-8} CAP=${CAP:-485376} SHARE_LIMIT=${SHARE_LIMIT:-16384} ;;
+    VARIANT=${VARIANT:-home} SESS=${SESS:-8} CAP=${CAP:-485376} SHARE_LIMIT=${SHARE_LIMIT:-16384} KV_FORMAT=${KV_FORMAT:-fp8} ;;
   *) echo "TUNE=$TUNE: want quality (the default), context, agents or agents-fast (README.md, \"Pick what to prioritize\")" >&2; exit 2 ;;
 esac
 

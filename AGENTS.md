@@ -131,7 +131,7 @@ Every knob:
 | `VARIANT` | the release's width manifest: `home`, `bit325`, `bit338`, `up1`, `bit225`, `bit243`, `bit260`, `down1`, or a path to a custom exlr8-v2-manifest JSON | by `TUNE` (`home`) |
 | `SESS` | requests decoding at once, 1-8 | by `TUNE` (8) |
 | `CAP` | the KV pool in tokens, a multiple of 64 | by `TUNE` (485376; 513536 with `TUNE=context`) |
-| `KV_FORMAT` | `fp8` or `int4` | by `TUNE` (unset = fp8) |
+| `KV_FORMAT` | `fp8` or `int4` | by `TUNE`, always set: fp8 (quality, agents, agents-fast), int4 (context) |
 | `SHARE_LIMIT` | requests up to this many tokens (prompt + max_tokens) share decode steps; every rank holds a session's first `SHARE_LIMIT` tokens and a share of the rest | by `TUNE` (unset = gr8's 32768; 16384 with `TUNE=agents` and `agents-fast`) |
 | `KV_STORE` | `ssd:<dir>,size=200G,persist=on,keep=sessions` | off (opt-in tier; commented in `.env.example`) |
 | `CONC` | `1`, `2`, `4`, `8`: sessions at once; sets `SESS` and `CAP` from `conc.tsv` | `4` |
