@@ -2,8 +2,8 @@
 # (spark-attic, github.com/bertholomus/spark-attic) lends each rank its display-carveout slice so the KV pool
 # can grow. Used as
 #   docker compose -f compose.yaml -f compose.attic.yaml up -d
-# with docker/.env naming an image WITH the attic client (the pinned ghcr.io/kindlingai/gr8:sha-e231adb has none, and
-# ./glm53 / knobs.sh refuse ATTIC=1 on it) and EXTRA_ENV carrying
+# with docker/.env naming an image WITH the attic client (the attic client is NOT in any published gr8 image,
+# and ./glm53 / knobs.sh refuse ATTIC=1 on the pinned stock image) and EXTRA_ENV carrying
 # GR8_ATTIC_SOCK=/run/spark-attic/attic.sock GR8_ATTIC_KEY_FILE=/run/gr8-attic/key.
 # atticd's socket is 0660 root:root and its key 0600 root (/etc/spark-attic; both untouched): the engine (uid
 # 1000) joins group 0 for the socket (mounted read-only), and a one-shot root container copies the key (mounted

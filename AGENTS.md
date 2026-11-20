@@ -88,7 +88,7 @@ the int4 KV knobs (rows on this rig not yet measured).
 
 | `TUNE` | the settings it sets (`knobs.sh`) | what it gives |
 |---|---|---|
-| `quality` (default) | `VARIANT=bit275`, `CONC=4` (SESS=4, CAP from conc.tsv), gr8's launcher defaults otherwise | the exact model's output: temp-0 replies identical across boots (gr8 checks this itself); 4 sessions; a 694,784-token pool (776,704 with `ATTIC=1`) |
+| `quality` (default) | `VARIANT=bit280`, `CONC=6` (SESS=6, CAP 776,704 with `ATTIC=1`), the lane defaults in `.env.example` | the exact model's output: temp-0 replies identical across boots (gr8 checks this itself); 6 sessions; a 776,704-token pool with `ATTIC=1` |
 | `context` | `VARIANT=home SESS=8 CAP=513536 KV_FORMAT=int4` | the int4 KV trade (gr8 docs/KV4.md), a 513,536-token pool; rows on this rig pending |
 | `agents` | `VARIANT=home SESS=8 CAP=485376 SHARE_LIMIT=16384` | for agents: four 60-70K-token agents stay in the pool at once, each warm turn a prefix hit; exact output as quality; a request over 16,384 tokens (prompt + max_tokens) decodes alone. Measured 2026-11-09 |
 | `agents-fast` (opt-in) | `agents` + `EXTRA_ENV` word `GR8_REUSE_ALIGN=0` | a warm turn prefills only its new tokens (warm-turn TTFT p50 3.4 s against 5.9 s); not bit-exact against a cold prefill (gr8 SETTINGS.md), and `knobs.sh` prints that warning. Measured 2026-11-09 |
@@ -102,9 +102,13 @@ Every value also carries the recipe defaults from `.env.example`:
   `GR8_STOP_GRACE` is read by `compose.yaml` (`stop_grace_period`); without it docker kills the engine mid-store.
 - `SESS`/`CAP`: the pool is shared by the sessions; a request holds at most `CAP` less the guard rows. `CONC=1|2|4|8`
   sets both from the measured table (`./glm53 conc` prints it).
-- `BUSY=1` (off by default): the busy guard. A request that would evict a live session's cache gets HTTP 429 +
-  `Retry-After` instead. It needs a gr8 image with the guard (README.md, "The busy guard"); `knobs.sh` refuses
-  `BUSY=1` on an image without it and names the fix. Tell the person their clients must retry on 429.
+- `BUSY=1` (on in `.env.example`, the measured lane): the busy guard. A request that would evict a live session's
+  cache gets HTTP 429 + `Retry-After` instead. The pinned stock image ships the guard (gr8 PR #516, merged before
+  ca7e874), so no custom build; `knobs.sh` verifies the image (known-good digest, or its knob table carries
+  `GR8_BUSY_GUARD`) and refuses `BUSY=1` on an image without it, naming the fix. v3 defaults: BUSY_IDLE_SECS 60, BUSY_RETRY_AFTER 60
+  (the measured lane). For clients that obey `Retry-After`, set `BUSY_IDLE_SECS=120 BUSY_RETRY_AFTER=20`: a refused
+  probe does not refresh the session's idle clock, so a client backed off at or above the idle bound loses its own
+  run. Tell the person their clients must retry on 429.
 - `ATTIC=1` (off by default): spark-attic memory lending; needs the spark-attic daemon on every box and an image with
   its client (README.md). Do not turn it on unless the person has spark-attic installed.
 - `EXTRA_ENV=GR8_GEN_CACHE=/var/lib/gr8/cache/gen-cache`: the loader's gen cache on each box's disk (first boot of an
@@ -135,12 +139,12 @@ Every knob:
 | `SHARE_LIMIT` | requests up to this many tokens (prompt + max_tokens) share decode steps; every rank holds a session's first `SHARE_LIMIT` tokens and a share of the rest | by `TUNE` (unset = gr8's 32768; 16384 with `TUNE=agents` and `agents-fast`) |
 | `KV_STORE` | `ssd:<dir>,size=200G,persist=on,keep=sessions` | off (opt-in tier; commented in `.env.example`) |
 | `CONC` | `1`, `2`, `4`, `8`: sessions at once; sets `SESS` and `CAP` from `conc.tsv` | `4` |
-| `BUSY` | `1`: the busy guard (needs an image with it) | `0` |
+| `BUSY` | `1`: the busy guard (ships in the pinned stock image) | `0` |
 | `ATTIC` | `1`: spark-attic memory lending (needs spark-attic on every box) | `0` |
 | `GR8_STOP_GRACE` | docker's stop grace period, needed with `KV_STORE` | off (`150s` with the store) |
 | `MENTAT` | `0`: the boxes in `PEERS`. `1`: find the boxes through the host's `mentat` daemon and register the API | `0` |
 | `GROUP` | the `mentat` group | `gr8-glm53-4x` |
-| `GR8_IMAGE` | the pinned image, read by compose | `ghcr.io/kindlingai/gr8:sha-e231adb` |
+| `GR8_IMAGE` | the pinned image, read by compose | `ghcr.io/kindlingai/gr8:sha-ca7e874@sha256:d140aca3...` (`ATTIC=1` needs your attic build, e.g. `gr8:ca7e874-attic`) |
 | `GR8_CACHE`, `GR8_HOME` | compose only: host directories in place of the `cache` and `home` volumes, owned by uid 1000 | the named volumes |
 | `MODEL`, `DRAFTER` | the release and drafter, pinned to Hugging Face commits (`./fetch --print` prints the pins) | the commits measured in README.md |
 | `FETCH_JOBS` | files the fetch takes at once | `8` |
@@ -227,7 +231,7 @@ converted copy, so each box downloads and converts its own rank part. Never copy
 | `./glm53 up` exits 4: the container restarted within 120 s | it is stopped already, and the engine's error from `out/supervisor.log` is printed above (2026-11-08 on this rig: `GR8_MOE_TOPK is a Flash-model option`). Remove or fix that option, `./glm53 down` on every box, then `./glm53 up` on all four. `./glm53 error` prints the error again |
 | `gr8 glm53 down` fails: `container ... is restarting, wait until the container is running` | a refused option left the container restart-looping: `./glm53 down` on each box stops the loop and prints the engine's error |
 | docker kills the engine during a stop, the next boot loses chats (SSD store on) | `GR8_STOP_GRACE=150s` is missing: uncomment it together with `KV_STORE` (compose reads it for `stop_grace_period`) |
-| `BUSY=1 needs an image with the busy guard` | the pinned image has no guard: build gr8 with it (README.md, "The busy guard") and set `GR8_IMAGE`, or set `BUSY=0` |
+| `BUSY=1 needs an image with the busy guard` | the image is not verified to carry the guard: pin the stock image (README.md, "The busy guard"; gr8 PR #516), or set `BUSY_KNOWN_GOOD_DIGESTS` to a build you verified, or set `BUSY=0` |
 | clients see HTTP 429 with `Retry-After` | `BUSY=1` is working: a live session's cache was protected. Clients should retry after the given seconds |
 | the image does not pull | build the thin recipe image on the box: `./glm53 up --build` (it is gr8's pinned image plus `knobs.sh`) |
 | a rank failed | every box's container exits non-zero and restarts, and the boxes boot again together; read the failing box's `./glm53 error` and `docker compose logs`, and, while it runs, `./glm53 logs supervisor` |

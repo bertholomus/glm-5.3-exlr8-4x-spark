@@ -4,12 +4,13 @@
 #
 #   docker buildx build --platform linux/arm64 -t glm53-4x-spark .      (compose.yaml builds it the same way)
 #
-# The pin is the image the measured rows come from: ghcr.io/kindlingai/gr8:sha-e231adb, digest
-# sha256:d920e26b3105f9f56f7766121394da1e37fb93d82e2176e20f8c1c2e64f4f174 (measured 2026-11-07).
-ARG GR8_IMAGE=ghcr.io/kindlingai/gr8@sha256:d920e26b3105f9f56f7766121394da1e37fb93d82e2176e20f8c1c2e64f4f174
+# v3 pin: the stock build the v3 rows were measured on — ghcr.io/kindlingai/gr8:sha-ca7e874 (the busy guard of
+# PR #516 is in it), digest sha256:d140aca32886d2055b7ff11d88c8860c6bb9c108c626f8f3a4f3cebdfe5fcfc6. The v3
+# default lane adds the attic client on top of this image (ATTIC=1; not in any published gr8 image — README).
+# v2.1 (issue #1, reported by Chuck @adapt-ai-systems): knobs.sh sources conc_lookup.sh next to itself, and
+# conc_lookup.sh reads conc.tsv and manifests/ next to itself — all COPYed, or the CONC dial silently dies.
+ARG GR8_IMAGE=ghcr.io/kindlingai/gr8@sha256:d140aca32886d2055b7ff11d88c8860c6bb9c108c626f8f3a4f3cebdfe5fcfc6
 FROM ${GR8_IMAGE}
-# Issue #1 (reported by Chuck, @adapt-ai-systems): knobs.sh sources conc_lookup.sh next to itself, and
-# conc_lookup.sh reads conc.tsv and manifests/ next to itself, so all of them are COPYed, or the CONC dial silently dies.
 COPY knobs.sh entrypoint.sh conc_lookup.sh conc.tsv /opt/glm53-4x/
 COPY manifests/ /opt/glm53-4x/manifests/
 COPY bin/gr8 /opt/glm53-4x/bin/gr8

@@ -8,12 +8,64 @@
 
 [GLM-5.3](https://huggingface.co/zai-org/GLM-5.3) on four DGX Sparks (GB10, 128 GB each) at TP=4, served by
 [gr8](https://github.com/kindlingai/gr8) from the kindlingai exlr8 release
-[`glm-5.3-exlr8-k2-k3-k4`](https://huggingface.co/kindlingai/glm-5.3-exlr8-k2-k3-k4): our bit275 width manifest (about
-2.75 bits per routed weight), a concurrency dial (`CONC=1|2|4|8`), optional spark-attic memory lending, fp8 KV,
-MTP + DFlash2 drafting, and an opt-in persistent SSD KV store so a stop can keep open chats for the next boot.
+[`glm-5.3-exlr8-k2-k3-k4`](https://huggingface.co/kindlingai/glm-5.3-exlr8-k2-k3-k4): the release's own bit280 width
+manifest (about 2.80 bits per routed weight, KindlingAI's v0.7 profile), a concurrency dial (`CONC=1|2|4|6|8`),
+spark-attic memory lending (on by default), fp8 KV, MTP + DFlash2 drafting, and a persistent SSD KV store (on by
+default) so a stop keeps chats for the next boot.
 
-**Default:** `VARIANT=bit275` at `CONC=4`. Every number in this README is our measurement on four DGX Sparks, or is
+**Default:** `VARIANT=bit280` at `CONC=6`, attic on, the busy guard on, the SSD KV store on. Every number in this README is our measurement on four DGX Sparks, or is
 marked as someone else's. Nothing unmeasured is presented as measured; "What is not measured yet" lists the gaps.
+
+## What is new in v3
+
+- **bit280 on the v0.7 mul1 weights, rebased on stock gr8 ca7e874.** `VARIANT=bit280` is KindlingAI's own width
+  manifest from release v0.7 (`manifests/exlr8-manifest-bit280.json` in their release; this recipe ships the same
+  bytes, sha256 `748cdc59...`) — about 2.80 routed bits per weight. **Their profile, not ours.** The release pin
+  moves to `kindlingai/glm-5.3-exlr8-k2-k3-k4@9e25c28a2e8808d8b2599d780521fd6af24e7558` (release v0.7, the mul1
+  weights); the stock image pin moves to
+  `ghcr.io/kindlingai/gr8:sha-ca7e874@sha256:d140aca32886d2055b7ff11d88c8860c6bb9c108c626f8f3a4f3cebdfe5fcfc6`
+  (gr8 ca7e874; the busy guard of v2.1 is in it). The default lane runs the attic build of that image
+  (`gr8:ca7e874-attic`, gr8 ca7e874 + the attic client `6e7df66b`); the attic client is still NOT in any published
+  gr8 image — build it and tag it, as v2 said.
+- **Six chats at once at the same 776,704-token pool** (`SESS=6`; the concurrency dial gains `6`): the v2 default
+  was 4 at the same pool, attic on in both. About 3 GB more free memory a box: boot serving
+  13.30 / 13.26 / 13.46 / 13.38 GiB across the four boxes (was 9.68-10.47 on the bit275 lane before it).
+- **The v3 measured row** — ONE boot, 2026-11-19, on our four Sparks with exactly the `.env.example` settings.
+  RigMark single chat code/prose/structured
+  **59.9 / 39.2 / 67.5 tok/s** (was 59.3 / 37.7 / 66.6, the v2 bit275 CONC 4 row), C4 aggregate **110.2 tok/s,
+  28.4 per chat** (was 95.5); C8 **103.7** — below C4 at SESS 6.
+  Honest rows: **one boot only** (RigMark is the median of 3 invocations on it); the clocks ran 2171-2190 MHz,
+  under the 2250 clean-clock bar, with no throttle flags; prefill 8K **1,454.7 tok/s** vs 1,561.0 on the previous
+  bit275 lane, **-6.8%**; agent warm TTFT p50 6.58 s, p90 **12.3 s** (was 6.9 s); smoke
+  14/14, quality panel 12/12, agent replay 24/24 turns with 20/20 warm reuses
+  on that boot. Attic-off rows and other SESS values are NOT measured on bit280.
+- **KL, KindlingAI's numbers, not ours**: their v0.7 card gives bit280 a full-vocabulary KL of 0.086 mean /
+  0.0125 median on model-written text (wikitext-2 0.121 / 0.0175).
+- **The SSD KV store is on by default** (`keep=all`, in the home volume), with `GR8_STOP_GRACE=150s`: measured
+  141.8-146.4 GB/h a box writes under load on the v3 boot.
+- **The busy guard is on by default** at gr8's own `BUSY_IDLE_SECS` 60 / `BUSY_RETRY_AFTER` 60 / `BUSY_QUEUE_MAX`
+  8 — the measured lane's pair. The v2.1 finding stands (a client that obeys `Retry-After` at or above the idle
+  bound loses its own retained run while it backs off), so `knobs.sh` prints it as a WARNING on every boot and the
+  docs name `BUSY_IDLE_SECS=120 BUSY_RETRY_AFTER=20` for agent lanes whose clients obey `Retry-After`.
+- Version bumped to 3 in `kindling.json`.
+
+## What is new in v2.1
+
+- **The busy guard is in stock gr8**: the pinned image is now `ghcr.io/kindlingai/gr8:sha-5625ed6@sha256:fdc662e2791b13e4d95ef2c6a8d8e6fd11f7f9b384c1d7d007fe76a9efc41c19`
+  (gr8 PR #516, merge `5625ed6`), so `BUSY=1` works with **no custom build**. `knobs.sh` accepts the pinned
+  image by digest (or any image whose own knob table carries `GR8_BUSY_GUARD`) and still refuses an image
+  without the guard, before any boot.
+- **Recipe defaults when `BUSY=1`**: `BUSY_IDLE_SECS` 120, `BUSY_RETRY_AFTER` 20, `BUSY_QUEUE_MAX` 8. Idle 120
+  sits above a full back-to-back agent prefill (four ~29K prompts took 84 s upstream, past gr8's 60);
+  retry 20 keeps the retry window well inside the idle bound; queue 8 names the bound past the free session
+  slots.
+- The guard was proposed by Matt Mastracci ([@mmastrac](https://x.com/mmastrac), KindlingAI) and merged by him
+  into stock gr8 (PR #516) with two fixes of his: `busy_view` now matches reserve's evictions exactly
+  (a split grant no longer double-counts evicted runs), and the intake check runs off the module hooks (modules
+  that never retain runs — DS41, Flash — never see it). It pairs with the tiered KV store and session-keep
+  design of Matt Mastracci ([@mmastrac](https://x.com/mmastrac), KindlingAI) and Chuck (@ck2084 on X; GitHub
+  @chuck-ads / @adapt-ai-systems, both KindlingAI).
+- Version bumped to 2.1 in `kindling.json`.
 
 ## What is new in v2
 
@@ -30,7 +82,7 @@ marked as someone else's. Nothing unmeasured is presented as measured; "What is 
   on by uncommenting two lines in `.env.example`.
 - Version bumped to 2 in `kindling.json`.
 
-## Measured: the `home` baseline (2026-11-07)
+## Measured (v2): the `home` baseline (2026-11-07)
 
 All numbers below are **our measurements, 2026-11-07**, on this recipe's stack: four DGX Sparks on a 200G switch,
 gr8 image `ghcr.io/kindlingai/gr8:sha-e231adb` (digest `sha256:d920e26b3105f9f56f7766121394da1e37fb93d82e2176e20f8c1c2e64f4f174`),
@@ -77,13 +129,13 @@ shipped bit243/bit260 pattern — it is not a measured KL order**. **KL: pending
 
 `TUNE` picks one of four sets of settings (`knobs.sh`; the `speed` slot was removed — its two measured knobs were
 no gain). A `VARIANT`, `SESS`, `CAP`, `SHARE_LIMIT` or `KV_FORMAT` you set yourself keeps your value, and anything
-already in `EXTRA_ENV` is kept after the tier's words. The default: `VARIANT=bit275` (the manifest ships in
-`manifests/exlr8-manifest-bit275.json`) at `CONC=4` — the serving choice.
+already in `EXTRA_ENV` is kept after the tier's words. The default: `VARIANT=bit280` (KindlingAI's v0.7 manifest, shipped in
+`manifests/exlr8-manifest-bit280.json`) at `CONC=6` — the serving choice. `bit275` (v2) still ships.
 
-The concurrency dial: `CONC=1|2|4|8` picks how many requests decode at once and takes the KV cache the freed slots
+The concurrency dial: `CONC=1|2|4|6|8` picks how many requests decode at once and takes the KV cache the freed slots
 give back — `CAP` follows the largest pool a boot at that `SESS` measured holding the serving floor (9 GiB free at
 ready, never under 8 GiB under load). `./glm53 conc` prints this table for your `VARIANT`; a `CAP` you set always
-wins (one above the measured value prints a warning on `./glm53 up`). Measured on bit275, SHARE_LIMIT 16384
+wins (one above the measured value prints a warning on `./glm53 up`). Measured on bit275 (the v2 rows, release `9372b74d`; the v3 bit280 row is in "What is new in v3"), SHARE_LIMIT 16384
 (speed cells cite the attic-on boots: single-chat speed is the same with the reserve layer on or off):
 
 | CONC | attic | CAP (tokens) | pages a rank | tokens per session | single-chat code/prose/structured | C4 | C8 | quality panel | measured |
@@ -104,10 +156,10 @@ Memory: every row held 9 GiB free per box at ready and never went under 8 GiB un
 
 | `TUNE` | sets | you get | status |
 |---|---|---|---|
-| `quality` (default) | `VARIANT=bit275`, `CONC=4`; gr8's launcher defaults otherwise | The exact model's output (temp-0 identical across boots), 4 sessions, the CONC 4 pool (694,784 tokens; 776,704 with `ATTIC=1`). | **Measured** 2026-11-10/11 (the concurrency table) |
+| `quality` (default) | `VARIANT=bit280`, `CONC=6`; the lane defaults (attic, the SSD store, the busy guard, `SHARE_LIMIT=16384`) | The exact model's output (temp-0 identical across boots), 6 sessions at the 776,704-token pool. | **Measured** 2026-11-19, one boot ("What is new in v3") |
 | `context` | `KV_FORMAT=int4`, `CAP=513536` | The int4 KV trade (gr8 docs/KV4.md: decode −2.3-3.3 %, prefill +5.8 %, temp-0 output moves marginally), a 513,536-token pool. | **Knobs set, not measured** on four Sparks |
-| `agents` | quality's settings and `SHARE_LIMIT=16384` | For agents (long prompts that come back turn after turn). Every rank holds a session's first `SHARE_LIMIT` tokens and a quarter of the rest, so the same 485,376-token pool keeps four 60-70K-token agents at once (1,857 of 2,088 pages a rank) and each warm turn is a prefix hit. Exact output, as quality. The cost: a request over 16,384 tokens (prompt + max_tokens) decodes alone instead of sharing decode steps (over 32,768 at quality). | **Measured** 2026-11-09 (same image and commits): the table below |
-| `agents-fast` (opt-in) | `TUNE=agents` and `GR8_REUSE_ALIGN=0` (on `EXTRA_ENV`) | A warm turn prefills only its new tokens: a prefix hit keeps the whole matched prefix instead of whole 4,096-row cells. **Not bit-exact against a cold prefill (gr8 SETTINGS.md)**: a warm turn can get other temp-0 text than the same request sent cold. `knobs.sh` prints that warning on every boot and command, and `./glm53 check-env` before the boot. | **Measured** 2026-11-09: the second table below. Opt-in only, never the default |
+| `agents` | quality's settings and `SHARE_LIMIT=16384` | For agents (long prompts that come back turn after turn). Every rank holds a session's first `SHARE_LIMIT` tokens and a quarter of the rest, so the same 485,376-token pool keeps four 60-70K-token agents at once (1,857 of 2,088 pages a rank) and each warm turn is a prefix hit. Exact output, as quality. The cost: a request over 16,384 tokens (prompt + max_tokens) decodes alone instead of sharing decode steps (over 32,768 at quality). | **Measured** 2026-11-09 (v2 rows, release `9372b74d`; not re-measured on v0.7): the table below |
+| `agents-fast` (opt-in) | `TUNE=agents` and `GR8_REUSE_ALIGN=0` (on `EXTRA_ENV`) | A warm turn prefills only its new tokens: a prefix hit keeps the whole matched prefix instead of whole 4,096-row cells. **Not bit-exact against a cold prefill (gr8 SETTINGS.md)**: a warm turn can get other temp-0 text than the same request sent cold. `knobs.sh` prints that warning on every boot and command, and `./glm53 check-env` before the boot. | **Measured** 2026-11-09 (v2 rows, release `9372b74d`; not re-measured on v0.7): the second table below. Opt-in only, never the default |
 
 `TUNE=agents`, measured 2026-11-09 on this rig (our measurements; same image, commits and protocols as "Measured"; the
 agent replay is four agents x 6 turns with ~60K-token prompts, staggered starts, temp 0):
@@ -138,25 +190,37 @@ On a lane where several agents share the four boxes, one agent's big cold prefil
 retained KV cache: the victim's next turn re-prefilled its whole prompt and the agent went quiet for minutes. The
 busy guard (gr8's `GR8_BUSY_*` knobs, opt-in) answers that arrival instead of evicting: when granting a request
 would evict a retained run whose session is not idle (no request in flight and its last response ended under
-`BUSY_IDLE_SECS` ago, default 60), the head refuses it at once with HTTP 429, an OpenAI-shaped error body and
-`Retry-After` (`BUSY_RETRY_AFTER`, default 60) — the client retries after the gap. `BUSY_QUEUE_MAX` (default 8)
-refuses arrivals past that queue depth. A turn that continues its own retained run is never refused, and the
+`BUSY_IDLE_SECS` ago; recipe default 120 with `BUSY=1`, gr8 upstream 60), the head refuses it at once with
+HTTP 429, an OpenAI-shaped error body and `Retry-After` (`BUSY_RETRY_AFTER`, recipe default 20, gr8 upstream 60)
+— the client retries after the gap. `BUSY_QUEUE_MAX` (recipe default 8) refuses arrivals once this many are
+already queued past the free session slots. A turn that continues its own retained run is never refused, and the
 refusal is decided at intake: a fresh arrival that would evict a live run is answered in under a second, before it
 waits in the queue (a grant-time check stays as a backstop; when the queue is saturated a backstop refusal can
 still wait long — see the numbers).
 
-The rule was proposed by Matt Mastracci ([@mmastrac](https://x.com/mmastrac), KindlingAI): "evict a session that is idle for > N s; if none are idle
-then 429".
+`BUSY_RETRY_AFTER` must stay under `BUSY_IDLE_SECS` (the recipe refuses the pair before any boot; a gr8 boot
+refusal is staged upstream): a refused
+probe does not refresh the session's idle clock — only admitted activity does — so a client that obeys
+`Retry-After` and backed off at or above the idle bound lost its own run before the retry arrived (with both at 60
+every obedient client did; the defaults 20 < 60 keep the retry window well inside the idle bound).
 
-Turn it on with `BUSY=1` (and `BUSY_IDLE_SECS` / `BUSY_RETRY_AFTER` / `BUSY_QUEUE_MAX` if you want other values).
-`BUSY=1` needs `GR8_IMAGE` to name an image **with** the guard: the pinned `ghcr.io/kindlingai/gr8:sha-e231adb`
-does not have it and the boot is refused with the fix named. Build gr8 from
-[github.com/bertholomus/gr8, branch `busy-guard`](https://github.com/bertholomus/gr8/tree/busy-guard) until the
-busy-guard PR merges into kindlingai/gr8; the guard is off by default upstream, so an image that merely contains
-it behaves exactly as before until you set `BUSY=1`.
+The rule was proposed by Matt Mastracci ([@mmastrac](https://x.com/mmastrac), KindlingAI): "evict a session
+that is idle for > N s; if none are idle then 429". He merged it into stock gr8 (PR #516, `5625ed6`) with two
+fixes of his: `busy_view` matches reserve's evictions exactly (a split grant no longer double-counts
+evicted runs), and the intake check runs off the module hooks, so modules that never retain runs (DS41, Flash)
+never see it. It pairs with the tiered KV store and session-keep design of Matt Mastracci ([@mmastrac](https://x.com/mmastrac),
+KindlingAI) and Chuck (@ck2084 on X; GitHub @chuck-ads / @adapt-ai-systems, both KindlingAI).
+
+Turn it on with `BUSY=1` (and `BUSY_IDLE_SECS` / `BUSY_RETRY_AFTER` / `BUSY_QUEUE_MAX` if you want other
+values). v2.1: the pinned stock image `ghcr.io/kindlingai/gr8:sha-5625ed6@sha256:fdc662e2791b13e4d95ef2c6a8d8e6fd11f7f9b384c1d7d007fe76a9efc41c19` (gr8 PR #516, merge `5625ed6`) ships the guard, so `BUSY=1`
+needs no custom build; `knobs.sh` verifies the image (its digest is known-good, or its own knob table must carry
+`GR8_BUSY_GUARD`) and refuses `BUSY=1` on an image without it, before any boot. The guard stays off by default
+upstream (`GR8_BUSY_GUARD=0`), so an image that merely contains it behaves exactly as before until you set
+`BUSY=1`.
 
 Measured on this rig (four DGX Sparks, GLM-5.3 bit275, 6 agents x ~130K tokens x multiple turns, `BUSY=1` vs
-`BUSY=0`, same boot count):
+`BUSY=0`, same boot count), before the merge on our busy-guard build — the guard code the pinned stock image now
+ships:
 
 | row | guard off | guard on |
 |---|---|---|
@@ -178,20 +242,20 @@ of the backstop, reported separately from the intake path, which stayed sub-seco
 | `SHAPE` | `ring`: four boxes cabled in a ring without a switch; list `PEERS` in cable order, leave out `IPS`/`IPS2` | unset (a switch) |
 | `TP` | 4 | `4` |
 | `TUNE` | `quality`, `context`, `agents`, `agents-fast` (opt-in, not bit-exact) | `quality` |
-| `VARIANT` | `bit275` (shipped in `manifests/`), or the release's width manifests: `home` (measured), `bit325`, `bit338`, `up1`, `bit225`, `bit243`, `bit260`, `down1`, or a path to a custom exlr8-v2-manifest JSON | `bit275` (`home` for `context`/`agents`) |
+| `VARIANT` | `bit280` (v3 default) or `bit275` (v2), both shipped in `manifests/`, or the release's width manifests: `home` (measured), `bit325`, `bit338`, `up1`, `bit225`, `bit243`, `bit260`, `down1`, or a path to a custom exlr8-v2-manifest JSON | `bit280` (`home` for `context`/`agents`) |
 | `SESS` | requests decoding at once, 1-8 | set by `CONC` (4) |
 | `CONC` | `1`, `2`, `4`, `8`: the concurrency dial. Sets `SESS` and lets `CAP` follow the largest CAP a boot at that SESS measured holding the serving floor (9 GiB free at ready, never under 8 GiB under load) — fewer slots, more KV cache per session (`./glm53 conc` prints the measured table for your `VARIANT`, split by the `attic` column). A `CAP` you set keeps your value; one above the measured value warns (it is not refused). A pair with no measured row falls back to `SESS=CONC` and the `TUNE`'s `CAP`, with a stderr line | `4` |
 | `ATTIC` | `1`: boot with the memory-reserve layer ([spark-attic](https://github.com/bertholomus/spark-attic)) lending each rank its display-carveout slice (`compose.attic.yaml` is added to the compose files, and the `CONC` rows with `attic on` apply). Needs `GR8_IMAGE` to name an image **with** the attic client — the pinned `ghcr.io/kindlingai/gr8:sha-e231adb` has none and `ATTIC=1` is refused with the fix named. The gr8 attic client is not in a published gr8 image yet: `ATTIC=1` needs a gr8 build that includes it | `0` |
-| `BUSY` | `1`: the busy guard. When granting a request would evict a retained run whose session is not idle (no request in flight and its last response ended under `BUSY_IDLE_SECS` ago, default 60), the head refuses it at once with HTTP 429, an OpenAI-shaped error body and `Retry-After` (`BUSY_RETRY_AFTER`, default 60) — instead of evicting the run (that agent then sits out a full re-prefill, minutes of silence) or queueing the request in silence. `BUSY_QUEUE_MAX` (default 8) refuses arrivals past that queue depth. A turn that continues its own retained run is never refused. Needs `GR8_IMAGE` to name an image **with** the busy guard (a gr8 build of the busy-guard branch); the pinned image has none and `BUSY=1` is refused with the fix named | `0` |
-| `BUSY_IDLE_SECS` | `BUSY=1`: a session counts as idle when it has no request in flight and its last response ended at least this many seconds ago; only idle sessions' retained runs are evicted. Tune it from your agents' tool-call gaps | gr8's 60 |
-| `BUSY_RETRY_AFTER` | `BUSY=1`: the seconds in a refused request's `Retry-After` header and error body | gr8's 60 |
-| `BUSY_QUEUE_MAX` | `BUSY=1`: a request arriving while this many requests are already queued is refused at once instead of joining the queue; 0 = no bound | gr8's 8 |
+| `BUSY` | `1`: the busy guard. When granting a request would evict a retained run whose session is not idle (no request in flight and its last response ended under `BUSY_IDLE_SECS` ago), the head refuses it at once with HTTP 429, an OpenAI-shaped error body and `Retry-After` (`BUSY_RETRY_AFTER`) — instead of evicting the run (that agent then sits out a full re-prefill, minutes of silence) or queueing the request in silence. `BUSY_QUEUE_MAX` refuses arrivals once this many are already queued past the free session slots. A turn that continues its own retained run is never refused. v2.1: the pinned stock image ships the guard (gr8 PR #516, merge `5625ed6`); `knobs.sh` verifies the image by digest or its knob table and refuses `BUSY=1` on an image without it | `0` |
+| `BUSY_IDLE_SECS` | `BUSY=1`: a session counts as idle when it has no request in flight and its last response ended at least this many seconds ago; only idle sessions' retained runs are evicted. Tune it from your agents' tool-call gaps | recipe 60 (gr8 60); `120` for agent lanes whose clients obey `Retry-After` |
+| `BUSY_RETRY_AFTER` | `BUSY=1`: the seconds in a refused request's `Retry-After` header and error body. Keep it under `BUSY_IDLE_SECS` for clients that obey `Retry-After` (v3 defaults to the measured lane's 60/60 and prints a WARNING on every boot): a refused probe does not refresh the session's idle clock, so a client that obeys `Retry-After` and backs off at or above the idle bound loses its own run before the retry arrives. For such agent lanes set `BUSY_IDLE_SECS=120 BUSY_RETRY_AFTER=20` | recipe 60 (gr8 upstream 60); `20` with `BUSY_IDLE_SECS=120` |
+| `BUSY_QUEUE_MAX` | `BUSY=1`: a request arriving while this many requests are already queued past the free session slots is refused at once instead of joining the queue; 0 = no bound | recipe 8 (gr8 8) |
 | `CAP` | the KV pool in tokens, shared by the sessions, a multiple of 64 | by `TUNE` (485376; 513536 with int4 KV) |
 | `SHARE_LIMIT` | requests up to this many tokens (prompt + max_tokens) share decode steps; every rank holds a session's first `SHARE_LIMIT` tokens and a share of the rest. A multiple of 64 from 4096 | by `TUNE` (gr8's 32768; 16384 with `TUNE=agents` and `agents-fast`) |
 | `KV_STORE` | `ssd:<dir>,size=200G,persist=on,keep=sessions`: at an orderly stop the engine writes open chats to the SSD; the next boot restores their KV. An **opt-in tier** in v2 | off by default; uncomment the two lines in `.env.example` (see ["Switching"](#switching-and-the-ssd-kv-store-tier-opt-in)) |
 | `GR8_STOP_GRACE` | docker's stop grace, read by `compose.yaml` | `150s` — set it when the SSD KV store tier is on, or docker kills the engine mid-store |
 | `MENTAT` | `0`: the boxes in `PEERS`. `1`: find the boxes through the host's `mentat` daemon and register the API in group `GROUP` | `0` |
-| `GR8_IMAGE` | the pinned image, read by `compose.yaml` | `ghcr.io/kindlingai/gr8:sha-e231adb` |
+| `GR8_IMAGE` | the pinned image, read by `compose.yaml` | `ghcr.io/kindlingai/gr8:sha-ca7e874@sha256:d140aca3...` (`.env.example` sets `gr8:ca7e874-attic`, your attic build) |
 | `MODEL`, `DRAFTER` | the release and the drafter, each pinned to a Hugging Face commit | the commits measured above (`./fetch --print` prints them) |
 | `EXTRA_ENV` | engine settings, `NAME=value` pairs separated by spaces | `GR8_GEN_CACHE=/var/lib/gr8/cache/gen-cache` |
 
@@ -346,13 +410,13 @@ a stand-in docker (`tests/fake-docker`) and a show-config fixture in gr8's real 
 - The SSD KV store tier's write rate on a current gr8 build: our measured numbers ran `keep=all` on gr8
   `a555ee2` (see ["Switching"](#switching-and-the-ssd-kv-store-tier-opt-in)); the newer store work by Chuck ([@ck2084](https://x.com/ck2084)) (#484,
   #498, #500, #501) postdates that base and is not measured on this rig.
-- bit275's KL against the full-precision model: no KL card yet.
+- bit275's KL against the full-precision model: no KL card yet. bit280's KL is KindlingAI's (their v0.7 card), not ours.
 - CONC 1-8 with `ATTIC=0`: memory, cache size and quality measured; C4/C8 aggregate speed not measured.
 - A clean-boot switch timing GLM-5.3 ↔ another model on this recipe.
 - Custom width manifests (`VARIANT=<path>`) other than the shipped bit275.
 
 ## Licence
 
-The recipe's scripts and docs: MIT (LICENSE). `manifests/exlr8-manifest-bit275.json` is a modified KindlingAI exlr8
-manifest, shared under CC BY 4.0 with credit to KindlingAI (see above). The model weights stay under the GLM-5.3
+The recipe's scripts and docs: MIT (LICENSE). `manifests/exlr8-manifest-bit280.json` is KindlingAI's own v0.7 manifest, unmodified;
+`manifests/exlr8-manifest-bit275.json` is a modified KindlingAI exlr8 manifest; both are shared under CC BY 4.0 with credit to KindlingAI (see above). The model weights stay under the GLM-5.3
 License; gr8 is KindlingAI's (MIT).

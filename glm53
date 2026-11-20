@@ -56,9 +56,10 @@ SUPERVISOR_LOG=/var/lib/gr8/home/out/supervisor.log        # GR8_WORK_DIR (compo
 # Plain GR8_* names that are not engine variables: gr8 launcher options (GR8_MODEL, GR8_WORK_DIR; `./gr8 glm53 knobs`)
 # and the names compose.yaml reads (GR8_IMAGE, GR8_STOP_GRACE, GR8_CACHE, GR8_HOME).
 PLAIN_GR8_OK=" GR8_MODEL GR8_WORK_DIR GR8_IMAGE GR8_STOP_GRACE GR8_CACHE GR8_HOME "
-# Names show-config does not echo: knobs.sh's TUNE and MENTAT (MENTAT=0 is dropped, 1 becomes MENTAT=localhost), the
-# compose-only names, and the fetcher's HF_TOKEN (a secret: never printed) and FETCH_JOBS.
-NOT_CHECKED=" TUNE MENTAT GR8_IMAGE GR8_STOP_GRACE GR8_CACHE GR8_HOME HF_TOKEN FETCH_JOBS ${GLM53_NOT_CHECKED:-} "
+# Names show-config does not echo: knobs.sh's TUNE, MENTAT, ATTIC and BUSY (MENTAT=0 is dropped, 1 becomes
+# MENTAT=localhost; ATTIC picks the compose files and the attic EXTRA_ENV words; BUSY becomes the GR8_BUSY_*
+# words), the compose-only names, and the fetcher's HF_TOKEN (a secret: never printed) and FETCH_JOBS.
+NOT_CHECKED=" TUNE MENTAT ATTIC BUSY GR8_IMAGE GR8_STOP_GRACE GR8_CACHE GR8_HOME HF_TOKEN FETCH_JOBS ${GLM53_NOT_CHECKED:-} "
 
 # --------------------------------------------------------------------------------------------------------- .env
 env_lines() {  # one "NAME<TAB>value" per assignment in $ENV_FILE ("BAD<TAB>line" for a line that is not one)

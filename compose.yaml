@@ -18,7 +18,7 @@ services:
   gr8:
     build:
       context: .
-    image: ${GR8_IMAGE:-ghcr.io/kindlingai/gr8:sha-e231adb}
+    image: ${GR8_IMAGE:-ghcr.io/kindlingai/gr8:sha-ca7e874@sha256:d140aca32886d2055b7ff11d88c8860c6bb9c108c626f8f3a4f3cebdfe5fcfc6}
     container_name: glm53-4x-spark
     # The knobs (TUNE, VARIANT, SESS, CAP, KV_STORE, EXTRA_ENV, MENTAT; README.md) come from .env. Unset, the
     # launcher's defaults apply, with TUNE=quality's settings from knobs.sh.
@@ -62,9 +62,9 @@ services:
     # Under memory pressure the kernel ends the engine before sshd or the rest of the box.
     oom_score_adj: 1000
     init: true
-    # SIGTERM makes the supervisor quit its engine. KV_STORE=ssd:...,persist=on,keep=sessions (the recipe default in
-    # .env.example) gives the quit up to 120 s to store the open chats for the next boot: the recipe sets
-    # GR8_STOP_GRACE=150s with it, or docker kills the engine mid-store (gr8/docker/compose.yaml).
+    # SIGTERM makes the supervisor quit its engine. KV_STORE=ssd:...,persist=on,keep=all (on by default in v3,
+    # .env.example) gives the quit up to 150 s (GR8_STOP_GRACE) to store the sessions for the next boot; without
+    # the grace docker kills the engine mid-store (gr8/docker/compose.yaml).
     stop_grace_period: ${GR8_STOP_GRACE:-150s}
     volumes:
       # This box's part of the release (./fetch fills it, ~85.6 GB at TP=4 variant home) and, inside it, the SSD KV

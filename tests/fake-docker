@@ -22,7 +22,7 @@ case "$1" in
   compose)
     shift
     case "$*" in
-      "up -d"*|"stop gr8") : ;;
+      "-f compose.yaml -f compose.attic.yaml up -d"*|"up -d"*|"-f compose.yaml -f compose.attic.yaml stop gr8"|"stop gr8") : ;;
       *"glm53 show-config") cat "$FAKE_SHOW_CONFIG" ;;
       *"glm53 down") exit "${FAKE_DOWN_RC:-0}" ;;
       *) echo "fake docker: unexpected: compose $*" >&2; exit 9 ;;

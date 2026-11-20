@@ -1,6 +1,6 @@
 #!/bin/bash
 # conc_lookup.sh — the CONC knob's table lookup, sourced by knobs.sh (and usable by ./glm53 conc).
-# One knob, CONC=1|2|4|8, sets SESS and lets CAP follow the largest CAP that a boot at that SESS
+# One knob, CONC=1|2|4|6|8, sets SESS and lets CAP follow the largest CAP that a boot at that SESS
 # measured holding the serving floor (ready >= 9 GiB free per box, never under 8 under load). A user-set CAP keeps its value; a CAP above the
 # measured one for that CONC warns on stderr (not refused). A (VARIANT, CONC) pair with no measured
 # row falls back to SESS=$CONC and the TUNE's CAP, with a stderr line. No fitted or interpolated CAP
@@ -38,10 +38,10 @@ conc_variant_key() {  # conc_variant_key VARIANT: name for shipped manifests, sh
   case "$v" in
     */*) [ -f "$v" ] || { echo ""; return; }
          echo "sha256:$(sha256sum "$v" | cut -c1-16)" ;;
-    bit275)  # the recipe's shipped manifest: resolve to the file so the hash key matches the boot
-         [ -f "$(dirname "${BASH_SOURCE[0]}")/manifests/exlr8-manifest-bit275.json" ] \
-           && echo "sha256:$(sha256sum "$(dirname "${BASH_SOURCE[0]}")/manifests/exlr8-manifest-bit275.json" | cut -c1-16)" \
-           || echo "bit275" ;;
+    bit275|bit280)  # the recipe's shipped manifests: resolve to the file so the hash key matches the boot
+         [ -f "$(dirname "${BASH_SOURCE[0]}")/manifests/exlr8-manifest-$v.json" ] \
+           && echo "sha256:$(sha256sum "$(dirname "${BASH_SOURCE[0]}")/manifests/exlr8-manifest-$v.json" | cut -c1-16)" \
+           || echo "$v" ;;
     *)   echo "$v" ;;
   esac
 }
@@ -49,8 +49,8 @@ conc_variant_key() {  # conc_variant_key VARIANT: name for shipped manifests, sh
 conc_apply() {  # conc_apply CONC VARIANT TUNE_CAP [USER_CAP 1|""] [ATTIC 0|1]: SESS/CAP per the rules; 0 ok, 2 bad
   local conc=$1 variant=$2 tune_cap=$3 user_cap=${4:-} attic=${5:-0} key row meas
   case "$conc" in
-    1|2|4|8) ;;
-    *) echo "CONC=$conc: want 1, 2, 4 or 8 (the concurrency dial: CONC sets SESS and grows the KV pool as the slots free; README.md, \"Pick what to prioritize\")" >&2; return 2 ;;
+    1|2|4|6|8) ;;
+    *) echo "CONC=$conc: want 1, 2, 4, 6 or 8 (the concurrency dial: CONC sets SESS and grows the KV pool as the slots free; README.md, \"Pick what to prioritize\")" >&2; return 2 ;;
   esac
   case "$attic" in
     0|1) ;;

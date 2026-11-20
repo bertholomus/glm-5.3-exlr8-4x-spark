@@ -2,10 +2,10 @@
 # The CI no-GPU smoke: host-side checks only. Every check runs on plain files; nothing pulls, fetches or boots.
 #   1. every shell script parses (bash -n)
 #   2. .env.example parses as KEY=value lines, and carries the recipe defaults (UPDATE 2 EXTRA_ENV rule, the pinned
-#      MODEL/DRAFTER/GR8_IMAGE); the optional tiers ship commented: the SSD KV store tier (KV_STORE + GR8_STOP_GRACE)
-#      and BUSY=0
+#      MODEL/DRAFTER, the attic-build GR8_IMAGE with the stock pin beside it); the v3 lane defaults ship uncommented:
+#      the SSD KV store (KV_STORE + GR8_STOP_GRACE), BUSY=1, ATTIC=1 and the four serving knobs
 #   3. knobs.sh dispatches TUNE=quality|context|agents|agents-fast (agents-fast warns on stderr), defaults
-#      VARIANT=bit275 CONC=4, and refuses a bad TUNE and a wrong PEERS count
+#      VARIANT=bit280 CONC=6, and refuses a bad TUNE and a wrong PEERS count
 #   4. ./fetch --print prints the pinned MODEL and DRAFTER, and ./fetch --check exits 0 on the pins
 #   5. compose.yaml and .github/workflows/ci.yml parse (python yaml / docker compose config if available)
 #   6. ./glm53 (the host-side launcher) against tests/fake-docker: check-env refuses a plain GR8_* engine line, a
@@ -43,21 +43,27 @@ while IFS= read -r line; do
   [[ $line =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || fail ".env.example: not a KEY=value line: $line"
 done < .env.example
 grep -q '^GR8_MODEL=glm53$' .env.example || fail ".env.example: GR8_MODEL=glm53 missing"
-grep -q '^MODEL=https://huggingface.co/kindlingai/glm-5.3-exlr8-k2-k3-k4@9372b74d77e129ea063bc0934df1570fc3173469$' .env.example \
-  || fail ".env.example: pinned MODEL missing"
+grep -q '^MODEL=https://huggingface.co/kindlingai/glm-5.3-exlr8-k2-k3-k4@9e25c28a2e8808d8b2599d780521fd6af24e7558$' .env.example \
+  || fail ".env.example: pinned MODEL (release v0.7) missing"
 grep -q '^DRAFTER=https://huggingface.co/incoai/GLM-5.3-DFlash2@' .env.example || fail ".env.example: pinned DRAFTER missing"
-# v2: the optional tiers ship commented (off by default): the SSD KV store tier and BUSY=0
-grep -q '^#KV_STORE=ssd:/var/lib/gr8/cache/kv,size=200G,persist=on,keep=sessions$' .env.example \
-  || fail ".env.example: the commented SSD KV_STORE tier line missing (v2: opt-in, ships commented)"
-grep -q '^#GR8_STOP_GRACE=150s$' .env.example \
-  || fail ".env.example: the commented GR8_STOP_GRACE=150s tier line missing (v2: opt-in, ships commented)"
-grep -q '^#BUSY=0$' .env.example || fail ".env.example: the commented BUSY=0 default missing (v2: the guard is opt-in)"
-grep -q '^KV_STORE=' .env.example && fail ".env.example: KV_STORE is uncommented — v2 ships the SSD store tier off"
-grep -q '^BUSY=' .env.example && fail ".env.example: BUSY is uncommented — v2 ships the guard off (BUSY=0 commented)"
-grep -q '^GR8_IMAGE=ghcr.io/kindlingai/gr8:sha-e231adb$' .env.example || fail ".env.example: pinned GR8_IMAGE missing"
-grep -q '^EXTRA_ENV=GR8_GEN_CACHE=/var/lib/gr8/cache/gen-cache$' .env.example \
-  || fail ".env.example: EXTRA_ENV gen-cache default missing (UPDATE 2: GR8_* knobs ride EXTRA_ENV)"
-echo "ok: .env.example parses and carries the recipe defaults (v2: optional tiers commented)"
+# v3: the lane defaults ship uncommented: the SSD KV store on (keep=all), BUSY=1, ATTIC=1, the serving knobs
+grep -q '^KV_STORE=ssd:/var/lib/gr8/home/kv,size=200G,persist=on,keep=all$' .env.example \
+  || fail ".env.example: the v3 SSD KV_STORE default line missing (on by default in v3, keep=all)"
+grep -q '^GR8_STOP_GRACE=150s$' .env.example \
+  || fail ".env.example: the GR8_STOP_GRACE=150s default missing (ships with the store)"
+grep -q '^BUSY=1$' .env.example || fail ".env.example: the BUSY=1 default missing (on by default in v3)"
+grep -q '^ATTIC=1$' .env.example || fail ".env.example: the ATTIC=1 default missing (on by default in v3)"
+grep -q '^KVB=fp8$' .env.example || fail ".env.example: the KVB=fp8 serving knob missing"
+grep -q '^CP_ONECHAIN=1$' .env.example || fail ".env.example: the CP_ONECHAIN=1 serving knob missing"
+grep -q '^S2_SHARED_WATERFILL=1$' .env.example || fail ".env.example: the S2_SHARED_WATERFILL=1 serving knob missing"
+grep -q '^KV_WRITE_LIMIT=0.5$' .env.example || fail ".env.example: the KV_WRITE_LIMIT=0.5 serving knob missing"
+grep -q '^GR8_IMAGE=gr8:ca7e874-attic$' .env.example \
+  || fail ".env.example: the v3 default GR8_IMAGE (the attic build of the pinned stock image) missing"
+grep -q '^#GR8_IMAGE=ghcr.io/kindlingai/gr8:sha-ca7e874@sha256:d140aca32886d2055b7ff11d88c8860c6bb9c108c626f8f3a4f3cebdfe5fcfc6$' .env.example \
+  || fail ".env.example: the commented stock pin (the ATTIC=0 image) missing"
+grep -q '^EXTRA_ENV=GR8_GEN_CACHE=/var/lib/gr8/cache/gen GR8_QUIT_FAST=1 GR8_S2_DECODE_PF=4096 GR8_S2_DECODE_ROUNDS=2$' .env.example \
+  || fail ".env.example: the v3 EXTRA_ENV serving words missing (UPDATE 2: GR8_* knobs ride EXTRA_ENV)"
+echo "ok: .env.example parses and carries the recipe defaults (v3: the measured lane's defaults uncommented)"
 
 # 3. knobs.sh: TUNE dispatch. Source it in a subshell and check what it exports. An EXTRA_ENV already in the
 #    environment is kept verbatim (TUNE appends, never replaces — the UPDATE 2 routing rule).
@@ -69,7 +75,7 @@ src_knobs() {  # src_knobs VAR=value... -> prints exported VARIANT/SESS/CAP/KV_F
 out=$(src_knobs TUNE=context)
 echo "$out" | grep -q 'CAP=513536 KV_FORMAT=int4' || fail "knobs.sh TUNE=context: got: $out"
 out=$(src_knobs TUNE=quality SESS=8 CAP=485376)
-echo "$out" | grep -q 'VARIANT=bit275 SESS=8 CAP=485376' || fail "knobs.sh TUNE=quality SESS=8 CAP=485376: got: $out"
+echo "$out" | grep -q 'VARIANT=bit280 SESS=8 CAP=485376 KV_FORMAT=fp8 SHARE_LIMIT=16384' || fail "knobs.sh TUNE=quality SESS=8 CAP=485376: got: $out"
 # KV_FORMAT is explicit in every tier (issue #1): fp8 for quality and agents, a user value kept
 echo "$out" | grep -q 'KV_FORMAT=fp8 ' || fail "knobs.sh TUNE=quality: KV_FORMAT not fp8: $out"
 out=$(src_knobs TUNE=agents)
@@ -79,9 +85,9 @@ echo "$out" | grep -q 'KV_FORMAT=int4 ' || fail "knobs.sh TUNE=quality KV_FORMAT
 err=$(src_knobs TUNE=agents SESS=8 CAP=485376 2>&1 >/dev/null)
 [ -z "$err" ] || fail "knobs.sh TUNE=agents SESS=8 CAP=485376 prints: $err"
 # agents-fast: agents + GR8_REUSE_ALIGN=0 on EXTRA_ENV (before what is there), and the exactness warning on stderr
-out=$(src_knobs TUNE=agents-fast CAP=776704)
-echo "$out" | grep -q 'VARIANT=home SESS=4 CAP=776704 KV_FORMAT=fp8 SHARE_LIMIT=16384 EXTRA_ENV=GR8_REUSE_ALIGN=0$' \
-  || fail "knobs.sh TUNE=agents-fast: got: $out"
+out=$(src_knobs TUNE=agents-fast CAP=776704 2>/dev/null)
+echo "$out" | grep -q 'VARIANT=home SESS=6 CAP=776704 KV_FORMAT=fp8 SHARE_LIMIT=16384 EXTRA_ENV=GR8_REUSE_ALIGN=0$' \
+  || fail "knobs.sh TUNE=agents-fast (the CONC=6 dial has no home row, CAP falls back with a stderr line): got: $out"
 out=$(src_knobs TUNE=agents-fast CAP=776704 EXTRA_ENV=GR8_GEN_CACHE=/x 2>/dev/null)
 echo "$out" | grep -q 'EXTRA_ENV=GR8_REUSE_ALIGN=0 GR8_GEN_CACHE=/x$' || fail "knobs.sh TUNE=agents-fast: EXTRA_ENV: $out"
 err=$(src_knobs TUNE=agents-fast 2>&1 >/dev/null)
@@ -99,26 +105,32 @@ out=$(src_knobs TUNE=agents SESS=4 CAP=776704)
 echo "$out" | grep -q 'VARIANT=home SESS=4 CAP=776704' \
   || fail "knobs.sh TUNE=agents (the home-width tier keeps home): got: $out"
 out=$(src_knobs TUNE=quality)
-echo "$out" | grep -q 'VARIANT=bit275' || fail "knobs.sh TUNE=quality: not bit275: $out"
+echo "$out" | grep -q 'VARIANT=bit280' || fail "knobs.sh TUNE=quality: not bit280: $out"
+echo "$out" | grep -q 'KV_FORMAT=fp8' || fail "knobs.sh TUNE=quality: KV_FORMAT not explicit fp8: $out"
 rc=0; err=$(src_knobs TUNE=speed 2>&1) || rc=$?
 [ "$rc" = 2 ] && echo "$err" | grep -q "want quality" || fail "knobs.sh TUNE=speed: not refused: rc $rc: $err"
 out=$(src_knobs TUNE=quality SESS=8 CAP=485376)
 echo "$out" | grep -q 'SESS=8 CAP=485376' || fail "knobs.sh explicit SESS/CAP not kept: $out"
-# the dial default: CONC=4 (bit275, attic off default) resolves the measured off-row 694784
+out=$(src_knobs TUNE=agents SESS=8 CAP=485376)
+echo "$out" | grep -q 'KV_FORMAT=fp8' || fail "knobs.sh TUNE=agents: KV_FORMAT not explicit fp8: $out"
+# the dial default: CONC=6 (bit280; the shipped .env sets ATTIC=1) resolves the measured attic row 776704;
+# attic off has no bit280 row, so the dial falls back to the TUNE CAP (776704) with a stderr line
+out=$(src_knobs TUNE=quality ATTIC=1 GR8_IMAGE=gr8:ca7e874-attic)
+echo "$out" | grep -q 'SESS=6 CAP=776704' || fail "knobs.sh default CONC=6 ATTIC=1 dial: got: $out"
+err=$(src_knobs TUNE=quality 2>&1 >/dev/null)
+echo "$err" | grep -q "CAP not measured for this CONC on this VARIANT" || fail "knobs.sh default dial attic off: no fallback stderr line: $err"
 out=$(src_knobs TUNE=quality)
-echo "$out" | grep -q 'SESS=4 CAP=694784' || fail "knobs.sh default CONC=4 dial: got: $out"
-out=$(src_knobs TUNE=quality ATTIC=1 GR8_IMAGE=gr8:e231adb-attic)
-echo "$out" | grep -q 'SESS=4 CAP=776704' || fail "knobs.sh default CONC=4 ATTIC=1 dial: got: $out"
+echo "$out" | grep -q 'SESS=6 CAP=776704' || fail "knobs.sh default CONC=6 dial (attic-off fallback CAP): got: $out"
 # CONC unset + SESS set: the dial does not run
 out=$(src_knobs TUNE=quality SESS=8 CAP=485376)
 echo "$out" | grep -q 'SESS=8' || fail "knobs.sh explicit SESS keeps: $out"
 # (the no-row fallback line: home has no measured rows in the real table)
 err=$(src_knobs TUNE=agents SESS= CAP= VARIANT=home CONC=1 2>&1 >/dev/null)
 echo "$err" | grep -q "CAP not measured for this CONC on this VARIANT" || fail "knobs.sh home no row: no fallback stderr line: $err"
-out=$(src_knobs TUNE=agents SESS= CAP= VARIANT=home CONC=1)
-echo "$out" | grep -q 'VARIANT=home SESS=1 CAP=485376' || fail "knobs.sh home CONC=1 no row: got: $out"
+out=$(src_knobs TUNE=agents SESS= CAP= VARIANT=home CONC=1 2>/dev/null)
+echo "$out" | grep -q 'VARIANT=home SESS=1 CAP=776704' || fail "knobs.sh home CONC=1 no row (the v3 dial falls back to the TUNE CAP 776704): got: $out"
 out=$(src_knobs TUNE=agents CONC=4 VARIANT=nonexistent-manifest.json 2>/dev/null)
-echo "$out" | grep -q 'SESS=4 CAP=485376' || fail "knobs.sh CONC=4 missing manifest file: got: $out"
+echo "$out" | grep -q 'SESS=4 CAP=776704' || fail "knobs.sh CONC=4 missing manifest file (fallback TUNE CAP): got: $out"
 out=$(src_knobs TUNE=agents CONC=4 CAP=700000)
 echo "$out" | grep -q 'SESS=4 CAP=700000' || fail "knobs.sh CONC=4 user CAP kept: got: $out"
 # rows with the attic column: a scratch conc.tsv inside this smoke copy (the repo file is never written)
@@ -132,25 +144,43 @@ echo "$out" | grep -q 'EXTRA_ENV=GR8_ATTIC_SOCK=/run/spark-attic/attic.sock GR8_
 err=$(src_knobs TUNE=agents CONC=4 ATTIC=1 2>&1) || rc=$?
 [ "$rc" = 2 ] && echo "$err" | grep -q "needs an image with the memory-reserve client" \
   || fail "knobs.sh ATTIC=1 pinned image: exit $rc: $err"
-# the BUSY toggle: guard words ride EXTRA_ENV; BUSY=1 refuses an image without the guard, with the fix named
-out=$(src_knobs TUNE=quality BUSY=1 GR8_IMAGE=gr8:busy-guard)
-echo "$out" | grep -q 'EXTRA_ENV=GR8_BUSY_GUARD=1$' || fail "knobs.sh BUSY=1: no guard word: $out"
-out=$(src_knobs TUNE=quality BUSY=1 BUSY_IDLE_SECS=45 BUSY_RETRY_AFTER=30 BUSY_QUEUE_MAX=4 GR8_IMAGE=gr8:busy-guard)
+# the BUSY toggle (v3): the guard ships in the pinned stock image (gr8 PR #516, in ca7e874); BUSY=1 accepts
+# it by digest with no docker needed, rides the guard words with the v3 recipe defaults (idle 60 / retry 60 /
+# queue 8, gr8's own upstream pair, the measured lane's), keeps explicit values, refuses an image without the
+# guard with the fix named, and BUSY=0 adds no words
+out=$(src_knobs TUNE=quality BUSY=1 2>/dev/null)
+echo "$out" | grep -q 'EXTRA_ENV=GR8_BUSY_GUARD=1 GR8_BUSY_IDLE_SECS=60 GR8_BUSY_RETRY_AFTER=60 GR8_BUSY_QUEUE_MAX=8$' \
+  || fail "knobs.sh BUSY=1 stock pin: guard words or v3 defaults wrong: $out"
+out=$(src_knobs TUNE=quality BUSY=1 BUSY_IDLE_SECS=45 BUSY_RETRY_AFTER=30 BUSY_QUEUE_MAX=4)
 echo "$out" | grep -q 'GR8_BUSY_GUARD=1 GR8_BUSY_IDLE_SECS=45 GR8_BUSY_RETRY_AFTER=30 GR8_BUSY_QUEUE_MAX=4' \
-  || fail "knobs.sh BUSY=1 knobs: got: $out"
-err=$(src_knobs TUNE=quality BUSY=1 2>&1) || rc=$?
+  || fail "knobs.sh BUSY=1 explicit knobs: got: $out"
+err=$(src_knobs TUNE=quality BUSY=1 GR8_IMAGE=ghcr.io/kindlingai/gr8:sha-e231adb 2>&1) || rc=$?
 [ "$rc" = 2 ] && echo "$err" | grep -q "needs an image with the busy guard" \
-  || fail "knobs.sh BUSY=1 pinned image: exit $rc: $err"
+  || fail "knobs.sh BUSY=1 old image without the guard: exit $rc: $err"
 err=$(src_knobs TUNE=quality BUSY=2 2>&1) || rc=$?
-[ "$rc" = 2 ] && echo "$err" | grep -q "want 0 (off, the default) or 1" || fail "knobs.sh BUSY=2: exit $rc: $err"
-out=$(src_knobs TUNE=quality BUSY=0 GR8_IMAGE=gr8:busy-guard)
+[ "$rc" = 2 ] && echo "$err" | grep -q "want 0 (off) or 1" || fail "knobs.sh BUSY=2: exit $rc: $err"
+out=$(src_knobs TUNE=quality BUSY=0 GR8_IMAGE=ghcr.io/kindlingai/gr8:sha-e231adb)
 echo "$out" | grep -q 'EXTRA_ENV=GR8_BUSY' && fail "knobs.sh BUSY=0: busy words present: $out" || true
+# the Retry-After/idle coherence (v3): RETRY >= IDLE is a WARNING, not a refusal — the v3 default pair IS 60/60
+# (the measured lane's); the words still ride EXTRA_ENV and the reason names the v2.1 finding and the 120/20 pair
+rc=0; err=$(src_knobs TUNE=quality BUSY=1 BUSY_IDLE_SECS=60 BUSY_RETRY_AFTER=60 2>&1 >/dev/null) || rc=$?
+[ "$rc" = 0 ] && echo "$err" | grep -q "is not under BUSY_IDLE_SECS" \
+  || fail "knobs.sh BUSY=1 60/60: no warning: rc $rc: $err"
+rc=0; err=$(src_knobs TUNE=quality BUSY=1 BUSY_IDLE_SECS=45 BUSY_RETRY_AFTER=90 2>&1 >/dev/null) || rc=$?
+[ "$rc" = 0 ] && echo "$err" | grep -q "is not under BUSY_IDLE_SECS" \
+  || fail "knobs.sh BUSY=1 45/90: no warning: rc $rc: $err"
+err=$(src_knobs TUNE=quality BUSY=1 BUSY_RETRY_AFTER=notanumber 2>&1) || rc=$?
+[ "$rc" = 2 ] && echo "$err" | grep -q "want whole seconds" || fail "knobs.sh BUSY=1 non-numeric retry: exit $rc: $err"
+# the docs name the shipped defaults (60/60/8) and the coherence rule
+grep -q "BUSY_RETRY_AFTER 60" knobs.sh || fail "knobs.sh: BUSY_RETRY_AFTER default 60 missing"
+grep -q "recipe 60 (gr8 upstream 60)" README.md || fail "README.md: BUSY_RETRY_AFTER default row not the recipe 60"
+grep -q "BUSY_IDLE_SECS 60, BUSY_RETRY_AFTER 60" AGENTS.md || fail "AGENTS.md: the v3 BUSY defaults missing"
 err=$(src_knobs TUNE=agents SESS= CAP= VARIANT=home CONC=4 CAP=900000 2>&1 >/dev/null)
 echo "$err" | grep -q "is above the measured 776704" || fail "knobs.sh CONC=4 over-cap: no warning: $err"
 out=$(src_knobs TUNE=agents SESS= CAP= VARIANT=home CONC=4 CAP=700000)
 echo "$out" | grep -q 'VARIANT=home SESS=4 CAP=700000' || fail "knobs.sh CONC=4 user CAP under measured kept: got: $out"
 err=$(src_knobs TUNE=agents CONC=3 2>&1) || rc=$?
-[ "$rc" = 2 ] && echo "$err" | grep -q "want 1, 2, 4 or 8" || fail "knobs.sh CONC=3: exit $rc: $err"
+[ "$rc" = 2 ] && echo "$err" | grep -q "want 1, 2, 4, 6 or 8" || fail "knobs.sh CONC=3: exit $rc: $err"
 err=$(src_knobs TUNE=agents ATTIC=maybe 2>&1) || rc=$?
 [ "$rc" = 2 ] && echo "$err" | grep -q "ATTIC=maybe: want 0" || fail "knobs.sh ATTIC=maybe: exit $rc: $err"
 # a bad TUNE exits 2 naming the values
@@ -161,13 +191,13 @@ rc=0; err=$(PEERS=10.0.0.1,10.0.0.2 bash -c '. "$1/knobs.sh"' _ "$here" 2>&1) ||
 [ "$rc" = 2 ] && echo "$err" | grep -q "want the four boxes" || fail "knobs.sh PEERS count: exit $rc: $err"
 # the settings layers: scripts/local.sh feeds knobs.sh; an exported variable beats it
 printf 'CONC=1\n' > scripts/local.sh
-out=$(src_knobs TUNE=agents SESS= CAP= VARIANT=home)
-echo "$out" | grep -q 'SESS=1 CAP=485376' || fail "knobs.sh scripts/local.sh CONC=1: got: $out"
+out=$(src_knobs TUNE=agents SESS= CAP= VARIANT=home 2>/dev/null)
+echo "$out" | grep -q 'SESS=1 CAP=776704' || fail "knobs.sh scripts/local.sh CONC=1 (fallback TUNE CAP): got: $out"
 out=$(CONC=4 src_knobs TUNE=agents SESS= CAP= VARIANT=home)
 echo "$out" | grep -q 'SESS=4 CAP=776704' || fail "knobs.sh exported CONC beats local.sh: got: $out"
-echo "ok: knobs.sh dispatches TUNE=quality|context|agents|agents-fast (with its warning), defaults VARIANT=bit275 CONC=4, refuses bad values, reads scripts/local.sh under the exported environment"
+echo "ok: knobs.sh dispatches TUNE=quality|context|agents|agents-fast (with its warning), defaults VARIANT=bit280 CONC=6, refuses bad values, reads scripts/local.sh under the exported environment"
 
-# Issue #1 (reported by Chuck, @adapt-ai-systems): the built image carries everything the boot path reads.
+# v2.1 (issue #1, reported by Chuck @adapt-ai-systems): the built image carries everything the boot path reads.
 # knobs.sh sources conc_lookup.sh next to itself; conc_lookup.sh reads conc.tsv and manifests/ next to itself
 # (BASH_SOURCE) — every referenced path must be COPYed by the Dockerfile or the CONC dial silently dies in it.
 copy_set=$(awk '/^COPY /{for(i=2;i<NF;i++) printf "%s\n", $i}' Dockerfile | sort -u)
@@ -193,7 +223,7 @@ echo "ok: the Dockerfile COPYs every file the boot path reads (issue #1)"
 
 # 4. fetch --print / --check, on a scratch copy of .env.example (cp, never mv; the scratch .env stays in place)
 pins=$(./fetch --print)
-echo "$pins" | grep -q '^MODEL=https://huggingface.co/kindlingai/glm-5.3-exlr8-k2-k3-k4@9372b74d77e129ea063bc0934df1570fc3173469$' \
+echo "$pins" | grep -q '^MODEL=https://huggingface.co/kindlingai/glm-5.3-exlr8-k2-k3-k4@9e25c28a2e8808d8b2599d780521fd6af24e7558$' \
   || fail "fetch --print: MODEL pin: $pins"
 echo "$pins" | grep -q '^DRAFTER=https://huggingface.co/incoai/GLM-5.3-DFlash2@' || fail "fetch --print: DRAFTER pin: $pins"
 cp .env.example .env
@@ -258,10 +288,12 @@ expect 4 "Flash-model option" "up (restart loop)" -- GLM53_ENV_FILE=tests/env-ok
 grep -q "^docker update --restart=no glm53-4x-spark$" tests/fake-docker.log || fail "glm53 up: the restart loop was not stopped"
 expect 0 "^ok: every knob" "up (healthy)" -- GLM53_ENV_FILE=tests/env-ok FAKE_STATE="running 0 0" "$G" up
 expect 0 "^ok: every knob" "up (after a stopped loop)" -- GLM53_ENV_FILE=tests/env-ok FAKE_STATE="running 0 0" FAKE_POLICY=no "$G" up
-grep -q "^docker compose up -d --force-recreate$" tests/fake-docker.log || fail "glm53 up: no --force-recreate after a stopped loop"
+grep -q "^docker compose -f compose.yaml -f compose.attic.yaml up -d --force-recreate$" tests/fake-docker.log \
+  || fail "glm53 up: no --force-recreate after a stopped loop"
 expect 2 "onto the one EXTRA_ENV line" "up (plain GR8_* line)" -- GLM53_ENV_FILE=tests/env-plain-gr8 FAKE_STATE="running 0 0" "$G" up
 expect 0 "^ok: every knob" "up --build" -- GLM53_ENV_FILE=tests/env-ok FAKE_STATE="running 0 0" "$G" up --build --no-watch
-grep -q "^docker compose up -d --build$" tests/fake-docker.log || fail "glm53 up --build: no docker compose up -d --build"
+grep -q "^docker compose -f compose.yaml -f compose.attic.yaml up -d --build$" tests/fake-docker.log \
+  || fail "glm53 up --build: no docker compose up -d --build"
 expect 1 "unknown option" "up (bad option)" -- GLM53_ENV_FILE=tests/env-ok "$G" up --bulid
 echo "ok: glm53 up stops a restart loop with the engine's error (exit 4), passes a healthy boot, recreates after a loop"
 for st in absent "exited 0 0" "created 0 0"; do
@@ -296,7 +328,8 @@ expect 0 "DRY_RUN: ./glm53 up on this box would:" "up (dry run)" -- DRY_RUN=1 GL
 n2=$(wc -l < tests/fake-docker.log)
 [ "$n1" = "$n2" ] || fail "glm53 up DRY_RUN=1 ran docker ($n1 -> $n2 fake-docker lines)"
 out=$(DRY_RUN=1 GLM53_ENV_FILE=tests/env-ok "$G" up 2>&1) || true
-echo "$out" | grep -q "docker compose up -d" || fail "up DRY_RUN: plan has no compose command: $out"
+echo "$out" | grep -q "docker compose -f compose.yaml -f compose.attic.yaml up -d" \
+  || fail "up DRY_RUN: plan has no compose command (the v3 default .env sets ATTIC=1): $out"
 echo "$out" | grep -q "nothing was changed" || fail "up DRY_RUN: no nothing-changed line: $out"
 echo "ok: DRY_RUN=1 up prints the plan (settings, compose command, watch) and runs nothing"
 

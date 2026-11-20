@@ -45,18 +45,25 @@ unset _c
 AGENTS_FAST_WARNING="WARNING: TUNE=agents-fast sets GR8_REUSE_ALIGN=0: not bit-exact against a cold prefill (gr8 \
 SETTINGS.md). A warm turn can get other temp-0 text than the same request sent cold. TUNE=agents keeps exact output."
 
-# The concurrency dial: CONC=1|2|4|8 sets SESS and lets
+# The v3 stock image pin: the build the rows in README.md were measured on (gr8 ca7e874; the busy guard of
+# PR #516 is in it). The default lane runs ATTIC=1 and names a build of this image WITH the attic client
+# (GR8_IMAGE=gr8:ca7e874-attic; the attic client is not in any published gr8 image).
+GR8_IMAGE_V3="ghcr.io/kindlingai/gr8:sha-ca7e874@sha256:d140aca32886d2055b7ff11d88c8860c6bb9c108c626f8f3a4f3cebdfe5fcfc6"
+# Images known to ship the busy guard (gr8 PR #516, merged before the v3 pin ca7e874). Override with your own verified build.
+BUSY_KNOWN_GOOD_DIGESTS="${BUSY_KNOWN_GOOD_DIGESTS:-sha256:d140aca32886d2055b7ff11d88c8860c6bb9c108c626f8f3a4f3cebdfe5fcfc6}"
+
+# The concurrency dial: CONC=1|2|4|6|8 sets SESS and lets
 # CAP follow the largest CAP a boot at that SESS measured holding the serving floor (9 GiB free at ready,
 # never under 8 under load). A CAP you set keeps your value; one above the measured value warns on stderr.
 # A pair with no measured row falls back to SESS=CONC and this TUNE's CAP, with a stderr line. The table is
 # conc.tsv (ATTIC=0 rows: the stock memory layout; ATTIC=1 rows: spark-attic lending); an uncommitted conc.local.tsv
 # adds your own rig's rows when present.
 # ./glm53 conc prints the table for the current VARIANT.
-# The dial defaults to CONC=4 (the serving choice):
-# with CONC unset and SESS unset, SESS=4 and CAP follows the measured bit275 row. A tier that sets SESS
-# itself (context: 8) or an explicit SESS keeps its value — the dial does not run for it.
+# The dial defaults to CONC=6 (the serving choice, v3):
+# with CONC unset and SESS unset, SESS=6 and CAP follows the measured bit280 attic row (776,704 tokens). A
+# tier that sets SESS itself (context: 8) or an explicit SESS keeps its value — the dial does not run for it.
 if [ -z "${CONC:-}" ] && [ -z "${SESS:-}" ] && [ "${TUNE:-quality}" != context ]; then
-  CONC=4
+  CONC=6
 fi
 if [ -n "${CONC:-}" ] || [ -n "${ATTIC:-}" ]; then
   # a CAP in the environment is the user's own; the TUNE case below only fills the default when it is unset
@@ -70,19 +77,23 @@ if [ -n "${CONC:-}" ] || [ -n "${ATTIC:-}" ]; then
   # ATTIC=1 needs an image with the memory-reserve client (the pinned upstream image has none): refuse here,
   # before any boot, with the fix named (the recipe cannot build that image for you; it is a local build)
   if [ "${ATTIC:-0}" = 1 ]; then
-    conc_attic_image_ok "${GR8_IMAGE:-ghcr.io/kindlingai/gr8:sha-e231adb}" \
-      || { echo "ATTIC=1 needs an image with the memory-reserve client (GR8_IMAGE=${GR8_IMAGE:-ghcr.io/kindlingai/gr8:sha-e231adb} has none; e.g. GR8_IMAGE=gr8:e231adb-attic, a gr8 build with the attic client), and compose.attic.yaml on the boot" >&2; exit 2; }
+    conc_attic_image_ok "${GR8_IMAGE:-$GR8_IMAGE_V3}" \
+      || { echo "ATTIC=1 needs an image with the memory-reserve client (GR8_IMAGE=${GR8_IMAGE:-$GR8_IMAGE_V3} has none; e.g. GR8_IMAGE=gr8:ca7e874-attic, a gr8 build of the pinned stock image with the attic client), and compose.attic.yaml on the boot" >&2; exit 2; }
     attic_words="GR8_ATTIC_SOCK=/run/spark-attic/attic.sock GR8_ATTIC_KEY_FILE=/run/gr8-attic/key"
   fi
-  conc_apply "$CONC" "${VARIANT:-bit275}" "${CAP:-485376}" "$conc_user_cap" "${ATTIC:-0}" || exit 2
+  conc_apply "$CONC" "${VARIANT:-bit280}" "${CAP:-776704}" "$conc_user_cap" "${ATTIC:-0}" || exit 2
   unset CONC conc_user_cap
 fi
 
 case "${TUNE:-quality}" in
   quality)
-    # the recipe default is the bit275 width manifest (it ships in manifests/ and
-    # VARIANT=bit275 resolves to it); SESS/CAP/CONC follow the concurrency dial below
-    VARIANT=${VARIANT:-bit275} KV_FORMAT=${KV_FORMAT:-fp8} ;;
+    # the v3 recipe default is KindlingAI's own bit280 width manifest from release v0.7 (mul1 weights; the
+    # release ships it as manifests/exlr8-manifest-bit280.json and this recipe copies the same file into
+    # manifests/, so VARIANT=bit280 resolves to the bytes the lane measured); SESS/CAP follow the concurrency
+    # dial below (CONC=6, attic on) and SHARE_LIMIT=16384 shares decode steps across agent turns. The v3 rows
+    # were measured on ONE boot (2026-11-19; README "What is new in v3").
+    # KV_FORMAT is explicit per tier (v2.1, issue #1 item 2): an image swap can never change it silently.
+    VARIANT=${VARIANT:-bit280} SHARE_LIMIT=${SHARE_LIMIT:-16384} KV_FORMAT=${KV_FORMAT:-fp8} ;;
   context)
     VARIANT=${VARIANT:-home} SESS=${SESS:-8} CAP=${CAP:-513536} KV_FORMAT=${KV_FORMAT:-int4} ;;
   agents|agents-fast)
@@ -96,28 +107,55 @@ unset AGENTS_FAST_WARNING
 export VARIANT SESS CAP
 [ -z "${SHARE_LIMIT:-}" ] || export SHARE_LIMIT
 [ -z "${KV_FORMAT:-}" ] || export KV_FORMAT
-# BUSY=0|1 (default 0): the busy guard (gr8 docs/ENV.md GR8_BUSY_*). 1 = when granting a request would evict a
+# BUSY=0|1: the busy guard (gr8 docs/ENV.md GR8_BUSY_*). 1 = when granting a request would evict a
 # retained run whose session is not idle (no request in flight and its last response ended under BUSY_IDLE_SECS
-# ago, default 60), the head refuses it at once with HTTP 429 + Retry-After (BUSY_RETRY_AFTER, default 60) instead
-# of evicting the run or queueing it in silence; BUSY_QUEUE_MAX (default 8) refuses arrivals past that queue depth.
-# A turn that continues its own retained run is never refused. BUSY=1 needs GR8_IMAGE to name an image **with** the
-# busy guard (a gr8 build of the busy-guard branch): the pinned ghcr.io/kindlingai/gr8:sha-e231adb has none and
-# BUSY=1 is refused here, before any boot, with the fix named.
+# ago) the head refuses it at once with HTTP 429 + Retry-After (BUSY_RETRY_AFTER) instead of evicting the run or
+# queueing it in silence; BUSY_QUEUE_MAX refuses arrivals past that queue depth. A turn that continues its own
+# retained run is never refused. v3 recipe defaults when BUSY=1: BUSY_IDLE_SECS 60, BUSY_RETRY_AFTER 60,
+# BUSY_QUEUE_MAX 8 — gr8's own upstream values, the pair the measured v3 lane runs. v2.1 measured the failure
+# mode of RETRY >= IDLE (a refused probe does not refresh the session's idle clock, so a client that obeys
+# Retry-After and backed off at or above the idle bound lost its own retained run; with both at 60 every obedient
+# client did): knobs.sh prints that as a WARNING here instead of refusing (the v3 default pair is the lane's
+# own), and an agent lane whose clients obey Retry-After should set BUSY_IDLE_SECS=120 BUSY_RETRY_AFTER=20.
+# v2.1: the busy guard ships in stock gr8 (PR #516, merge 5625ed6), so BUSY=1 works with no custom build: the
+# pinned image passes by digest, an image present locally is probed against its own knob table, and anything else
+# is refused here, before any boot, with the fix named.
+# the v3 stock pin and the known-good busy-guard digests are defined above the CONC/ATTIC block, which
+# reads the pin for its ATTIC=1 image check
+busy_img_has_guard() {  # $1 = image ref; exit 0 when the image is a known-good guard build by digest, or, when
+                        # the image is present locally, when its own knob table carries GR8_BUSY_GUARD
+  local img="$1" d="" good
+  case "$img" in *@sha256:*) d="${img##*@}" ;; esac
+  for good in $BUSY_KNOWN_GOOD_DIGESTS; do
+    [ -n "$d" ] && [ "$d" = "$good" ] && return 0
+  done
+  # Inside the container (entrypoint.sh) this image's own knob table is on disk: read it directly.
+  if [ -f "${GR8_KNOB_TABLE:-/opt/gr8/knobs/runtime.yaml}" ]; then
+    grep -q "^  GR8_BUSY_GUARD:" "${GR8_KNOB_TABLE:-/opt/gr8/knobs/runtime.yaml}" && return 0
+    return 1
+  fi
+  if command -v docker >/dev/null 2>&1 && docker image inspect "$img" >/dev/null 2>&1; then
+    docker run --rm --entrypoint sh "$img" -c "grep -q \"^  GR8_BUSY_GUARD:\" /opt/gr8/knobs/runtime.yaml" >/dev/null 2>&1 && return 0
+  fi
+  return 1
+}
 busy_words=""
 case "${BUSY:-0}" in
   0) ;;
   1)
-    case "${GR8_IMAGE:-}" in
-      *busy*) ;;
-      *) echo "BUSY=1 needs an image with the busy guard (GR8_IMAGE=${GR8_IMAGE:-ghcr.io/kindlingai/gr8:sha-e231adb} has none; e.g. GR8_IMAGE=gr8:busy-guard, a gr8 build with the busy guard), and GR8_BUSY_* ride EXTRA_ENV" >&2; exit 2 ;;
+    busy_img_has_guard "${GR8_IMAGE:-$GR8_IMAGE_V3}" || {
+      echo "BUSY=1 needs an image with the busy guard (GR8_IMAGE=${GR8_IMAGE:-$GR8_IMAGE_V3} is not verified to carry one; pin the stock build GR8_IMAGE=$GR8_IMAGE_V3, gr8 PR #516 merged before ca7e874, or set BUSY_KNOWN_GOOD_DIGESTS to a build you verified against its knob table), and GR8_BUSY_* ride EXTRA_ENV" >&2; exit 2; }
+    # v3 recipe defaults when BUSY=1: gr8's own upstream 60/60/8 — the pair the measured v3 lane runs. For an
+    # agent lane whose clients obey Retry-After, 120/20 (the v2.1 pair) keeps an obedient client's run alive.
+    busy_idle="${BUSY_IDLE_SECS:-60}"; busy_retry="${BUSY_RETRY_AFTER:-60}"; busy_queue="${BUSY_QUEUE_MAX:-8}"
+    case "${busy_idle}${busy_retry}${busy_queue}" in
+      *[!0-9]*) echo "BUSY_IDLE_SECS / BUSY_RETRY_AFTER / BUSY_QUEUE_MAX: want whole seconds and counts (got ${BUSY_IDLE_SECS:-unset, 60} / ${BUSY_RETRY_AFTER:-unset, 60} / ${BUSY_QUEUE_MAX:-unset, 8})" >&2; exit 2 ;;
     esac
-    busy_words="GR8_BUSY_GUARD=1"
-    [ -n "${BUSY_IDLE_SECS:-}" ] && busy_words="$busy_words GR8_BUSY_IDLE_SECS=$BUSY_IDLE_SECS"
-    [ -n "${BUSY_RETRY_AFTER:-}" ] && busy_words="$busy_words GR8_BUSY_RETRY_AFTER=$BUSY_RETRY_AFTER"
-    [ -n "${BUSY_QUEUE_MAX:-}" ] && busy_words="$busy_words GR8_BUSY_QUEUE_MAX=$BUSY_QUEUE_MAX"
-    unset BUSY_IDLE_SECS BUSY_RETRY_AFTER BUSY_QUEUE_MAX
+    [ "${busy_retry}" -lt "${busy_idle}" ] || echo "WARNING: BUSY_RETRY_AFTER=${busy_retry} is not under BUSY_IDLE_SECS=${busy_idle}: a refused probe does not refresh the session's idle clock, so a client that obeys Retry-After loses its own retained run while it backs off (v2.1 measured it with both at 60); for an agent lane that obeys Retry-After set BUSY_IDLE_SECS=120 BUSY_RETRY_AFTER=20" >&2
+    busy_words="GR8_BUSY_GUARD=1 GR8_BUSY_IDLE_SECS=$busy_idle GR8_BUSY_RETRY_AFTER=$busy_retry GR8_BUSY_QUEUE_MAX=$busy_queue"
+    unset BUSY_IDLE_SECS BUSY_RETRY_AFTER BUSY_QUEUE_MAX busy_queue
     ;;
-  *) echo "BUSY=${BUSY}: want 0 (off, the default) or 1 (the busy guard refuses what would evict a live session; needs an image with the guard)" >&2; exit 2 ;;
+  *) echo "BUSY=${BUSY}: want 0 (off) or 1 (the busy guard refuses what would evict a live session; the v3 recipe ships BUSY=1)" >&2; exit 2 ;;
 esac
 
 # Tier words that are GR8_* engine variables ride EXTRA_ENV (UPDATE 2, Kindling 2026-11-07: a plain GR8_*=... line is
