@@ -64,7 +64,7 @@ conc_apply() {  # conc_apply CONC VARIANT TUNE_CAP [USER_CAP 1|""] [ATTIC 0|1]: 
     # the user's CAP keeps its value; warn when it is above the measured one for this CONC
     meas=$(printf '%s' "$row" | awk -F'\t' '{print $5}')
     if [ -n "$meas" ] && printf '%s' "$meas" | grep -qE '^[0-9]+$'; then
-      [ "$CAP" -le "$meas" ] || echo "CAP=$CAP is above the measured $meas for CONC=$conc on this VARIANT: the serving floor (9 GiB free at ready, never under 8 under load) was verified only at $meas; $CAP is your call" >&2
+      [ "$CAP" -le "$meas" ] || echo "CAP=$CAP is above the measured $meas for CONC=$conc on this VARIANT: the serving floor (conc.tsv header) was verified only at $meas; $CAP is your call" >&2
     fi
   elif [ -n "$row" ] && printf '%s' "$row" | awk -F'\t' '{exit !($5 ~ /^[0-9]+$/)}'; then
     CAP=$(printf '%s' "$row" | awk -F'\t' '{print $5}')

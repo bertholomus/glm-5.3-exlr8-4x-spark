@@ -5,7 +5,7 @@
 #      MODEL/DRAFTER, the attic-build GR8_IMAGE with the stock pin beside it); the v3 lane defaults ship uncommented:
 #      the SSD KV store (KV_STORE + GR8_STOP_GRACE), BUSY=1, ATTIC=1 and the four serving knobs
 #   3. knobs.sh dispatches TUNE=quality|context|agents|agents-fast (agents-fast warns on stderr), defaults
-#      VARIANT=bit280 CONC=6, and refuses a bad TUNE and a wrong PEERS count
+#      VARIANT=bit280 CONC=8, and refuses a bad TUNE and a wrong PEERS count
 #   4. ./fetch --print prints the pinned MODEL and DRAFTER, and ./fetch --check exits 0 on the pins
 #   5. compose.yaml and .github/workflows/ci.yml parse (python yaml / docker compose config if available)
 #   6. ./glm53 (the host-side launcher) against tests/fake-docker: check-env refuses a plain GR8_* engine line, a
@@ -86,8 +86,8 @@ err=$(src_knobs TUNE=agents SESS=8 CAP=485376 2>&1 >/dev/null)
 [ -z "$err" ] || fail "knobs.sh TUNE=agents SESS=8 CAP=485376 prints: $err"
 # agents-fast: agents + GR8_REUSE_ALIGN=0 on EXTRA_ENV (before what is there), and the exactness warning on stderr
 out=$(src_knobs TUNE=agents-fast CAP=776704 2>/dev/null)
-echo "$out" | grep -q 'VARIANT=home SESS=6 CAP=776704 KV_FORMAT=fp8 SHARE_LIMIT=16384 EXTRA_ENV=GR8_REUSE_ALIGN=0$' \
-  || fail "knobs.sh TUNE=agents-fast (the CONC=6 dial has no home row, CAP falls back with a stderr line): got: $out"
+echo "$out" | grep -q 'VARIANT=home SESS=8 CAP=776704 KV_FORMAT=fp8 SHARE_LIMIT=16384 EXTRA_ENV=GR8_REUSE_ALIGN=0$' \
+  || fail "knobs.sh TUNE=agents-fast (the CONC=8 dial has no home row, CAP falls back with a stderr line): got: $out"
 out=$(src_knobs TUNE=agents-fast CAP=776704 EXTRA_ENV=GR8_GEN_CACHE=/x 2>/dev/null)
 echo "$out" | grep -q 'EXTRA_ENV=GR8_REUSE_ALIGN=0 GR8_GEN_CACHE=/x$' || fail "knobs.sh TUNE=agents-fast: EXTRA_ENV: $out"
 err=$(src_knobs TUNE=agents-fast 2>&1 >/dev/null)
@@ -113,14 +113,16 @@ out=$(src_knobs TUNE=quality SESS=8 CAP=485376)
 echo "$out" | grep -q 'SESS=8 CAP=485376' || fail "knobs.sh explicit SESS/CAP not kept: $out"
 out=$(src_knobs TUNE=agents SESS=8 CAP=485376)
 echo "$out" | grep -q 'KV_FORMAT=fp8' || fail "knobs.sh TUNE=agents: KV_FORMAT not explicit fp8: $out"
-# the dial default: CONC=6 (bit280; the shipped .env sets ATTIC=1) resolves the measured attic row 776704;
-# attic off has no bit280 row, so the dial falls back to the TUNE CAP (776704) with a stderr line
+# the dial default: CONC=8 (bit280; the shipped .env sets ATTIC=1) resolves the measured attic row 950272;
+# attic off has no bit280 CONC=8 row, so the dial falls back to the TUNE CAP (776704) with a stderr line
 out=$(src_knobs TUNE=quality ATTIC=1 GR8_IMAGE=gr8:ca7e874-attic)
-echo "$out" | grep -q 'SESS=6 CAP=776704' || fail "knobs.sh default CONC=6 ATTIC=1 dial: got: $out"
+echo "$out" | grep -q 'SESS=8 CAP=950272' || fail "knobs.sh default CONC=8 ATTIC=1 dial: got: $out"
+out=$(src_knobs TUNE=quality CONC=6 ATTIC=1 GR8_IMAGE=gr8:ca7e874-attic)
+echo "$out" | grep -q 'SESS=6 CAP=776704' || fail "knobs.sh CONC=6 ATTIC=1 (the v3 row): got: $out"
 err=$(src_knobs TUNE=quality 2>&1 >/dev/null)
 echo "$err" | grep -q "CAP not measured for this CONC on this VARIANT" || fail "knobs.sh default dial attic off: no fallback stderr line: $err"
 out=$(src_knobs TUNE=quality)
-echo "$out" | grep -q 'SESS=6 CAP=776704' || fail "knobs.sh default CONC=6 dial (attic-off fallback CAP): got: $out"
+echo "$out" | grep -q 'SESS=8 CAP=776704' || fail "knobs.sh default CONC=8 dial (attic-off fallback CAP): got: $out"
 # CONC unset + SESS set: the dial does not run
 out=$(src_knobs TUNE=quality SESS=8 CAP=485376)
 echo "$out" | grep -q 'SESS=8' || fail "knobs.sh explicit SESS keeps: $out"

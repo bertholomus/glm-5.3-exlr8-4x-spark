@@ -13,7 +13,7 @@ a person. A person can also paste this one line into their agent:
   from the person. If you cannot read them, ask.
 - **Run every check in this file and show its output.** A step is done when its check passes, not when the command
   returns.
-- **Keep the defaults** (`TUNE=quality`, `CONC=4`, `BUSY=0`, `ATTIC=0`, SSD store off) unless the person asks for
+- **Keep the defaults** (`TUNE=quality`, `CONC=8`, `BUSY=1`, `ATTIC=1`, SSD store on; `.env.example`) unless the person asks for
   something else. Section 2 says what each one trades.
 - **Do not publish numbers** from your run as this recipe's numbers. README.md holds the measured rows and on what
   hardware.
@@ -88,7 +88,7 @@ the int4 KV knobs (rows on this rig not yet measured).
 
 | `TUNE` | the settings it sets (`knobs.sh`) | what it gives |
 |---|---|---|
-| `quality` (default) | `VARIANT=bit280`, `CONC=6` (SESS=6, CAP 776,704 with `ATTIC=1`), the lane defaults in `.env.example` | the exact model's output: temp-0 replies identical across boots (gr8 checks this itself); 6 sessions; a 776,704-token pool with `ATTIC=1` |
+| `quality` (default) | `VARIANT=bit280`, `CONC=8` (SESS=8, CAP 950,272 with `ATTIC=1`), the lane defaults in `.env.example` | the exact model's output: temp-0 replies identical across boots (gr8 checks this itself); 8 sessions; a 950,272-token pool with `ATTIC=1` |
 | `context` | `VARIANT=home SESS=8 CAP=513536 KV_FORMAT=int4` | the int4 KV trade (gr8 docs/KV4.md), a 513,536-token pool; rows on this rig pending |
 | `agents` | `VARIANT=home SESS=8 CAP=485376 SHARE_LIMIT=16384` | for agents: four 60-70K-token agents stay in the pool at once, each warm turn a prefix hit; exact output as quality; a request over 16,384 tokens (prompt + max_tokens) decodes alone. Measured 2026-11-09 |
 | `agents-fast` (opt-in) | `agents` + `EXTRA_ENV` word `GR8_REUSE_ALIGN=0` | a warm turn prefills only its new tokens (warm-turn TTFT p50 3.4 s against 5.9 s); not bit-exact against a cold prefill (gr8 SETTINGS.md), and `knobs.sh` prints that warning. Measured 2026-11-09 |
@@ -138,7 +138,7 @@ Every knob:
 | `KV_FORMAT` | `fp8` or `int4` | by `TUNE`, always set: fp8 (quality, agents, agents-fast), int4 (context) |
 | `SHARE_LIMIT` | requests up to this many tokens (prompt + max_tokens) share decode steps; every rank holds a session's first `SHARE_LIMIT` tokens and a share of the rest | by `TUNE` (unset = gr8's 32768; 16384 with `TUNE=agents` and `agents-fast`) |
 | `KV_STORE` | `ssd:<dir>,size=200G,persist=on,keep=sessions` | off (opt-in tier; commented in `.env.example`) |
-| `CONC` | `1`, `2`, `4`, `8`: sessions at once; sets `SESS` and `CAP` from `conc.tsv` | `4` |
+| `CONC` | `1`, `2`, `4`, `6`, `8`: sessions at once; sets `SESS` and `CAP` from `conc.tsv` | `8` |
 | `BUSY` | `1`: the busy guard (ships in the pinned stock image) | `0` |
 | `ATTIC` | `1`: spark-attic memory lending (needs spark-attic on every box) | `0` |
 | `GR8_STOP_GRACE` | docker's stop grace period, needed with `KV_STORE` | off (`150s` with the store) |

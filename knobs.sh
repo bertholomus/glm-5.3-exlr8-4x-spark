@@ -53,17 +53,17 @@ GR8_IMAGE_V3="ghcr.io/kindlingai/gr8:sha-ca7e874@sha256:d140aca32886d2055b7ff11d
 BUSY_KNOWN_GOOD_DIGESTS="${BUSY_KNOWN_GOOD_DIGESTS:-sha256:d140aca32886d2055b7ff11d88c8860c6bb9c108c626f8f3a4f3cebdfe5fcfc6}"
 
 # The concurrency dial: CONC=1|2|4|6|8 sets SESS and lets
-# CAP follow the largest CAP a boot at that SESS measured holding the serving floor (9 GiB free at ready,
-# never under 8 under load). A CAP you set keeps your value; one above the measured value warns on stderr.
+# CAP follow the largest CAP a boot at that SESS measured holding the serving floor (conc.tsv: the older rows held
+# 9 GiB free at ready and never under 8 under load; the v3.1 bit280 CONC=8 row held never under 5 GiB under load). A CAP you set keeps your value; one above the measured value warns on stderr.
 # A pair with no measured row falls back to SESS=CONC and this TUNE's CAP, with a stderr line. The table is
 # conc.tsv (ATTIC=0 rows: the stock memory layout; ATTIC=1 rows: spark-attic lending); an uncommitted conc.local.tsv
 # adds your own rig's rows when present.
 # ./glm53 conc prints the table for the current VARIANT.
-# The dial defaults to CONC=6 (the serving choice, v3):
-# with CONC unset and SESS unset, SESS=6 and CAP follows the measured bit280 attic row (776,704 tokens). A
+# The dial defaults to CONC=8 (the serving choice, v3.1):
+# with CONC unset and SESS unset, SESS=8 and CAP follows the measured bit280 attic row (950,272 tokens). A
 # tier that sets SESS itself (context: 8) or an explicit SESS keeps its value — the dial does not run for it.
 if [ -z "${CONC:-}" ] && [ -z "${SESS:-}" ] && [ "${TUNE:-quality}" != context ]; then
-  CONC=6
+  CONC=8
 fi
 if [ -n "${CONC:-}" ] || [ -n "${ATTIC:-}" ]; then
   # a CAP in the environment is the user's own; the TUNE case below only fills the default when it is unset
@@ -90,8 +90,8 @@ case "${TUNE:-quality}" in
     # the v3 recipe default is KindlingAI's own bit280 width manifest from release v0.7 (mul1 weights; the
     # release ships it as manifests/exlr8-manifest-bit280.json and this recipe copies the same file into
     # manifests/, so VARIANT=bit280 resolves to the bytes the lane measured); SESS/CAP follow the concurrency
-    # dial below (CONC=6, attic on) and SHARE_LIMIT=16384 shares decode steps across agent turns. The v3 rows
-    # were measured on ONE boot (2026-11-19; README "What is new in v3").
+    # dial below (CONC=8, attic on) and SHARE_LIMIT=16384 shares decode steps across agent turns. The v3.1 rows
+    # were measured on ONE boot (2026-11-21; README "What is new in v3.1").
     # KV_FORMAT is explicit per tier (v2.1, issue #1 item 2): an image swap can never change it silently.
     VARIANT=${VARIANT:-bit280} SHARE_LIMIT=${SHARE_LIMIT:-16384} KV_FORMAT=${KV_FORMAT:-fp8} ;;
   context)

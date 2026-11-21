@@ -13,8 +13,30 @@ manifest (about 2.80 bits per routed weight, KindlingAI's v0.7 profile), a concu
 spark-attic memory lending (on by default), fp8 KV, MTP + DFlash2 drafting, and a persistent SSD KV store (on by
 default) so a stop keeps chats for the next boot.
 
-**Default:** `VARIANT=bit280` at `CONC=6`, attic on, the busy guard on, the SSD KV store on. Every number in this README is our measurement on four DGX Sparks, or is
+**Default:** `VARIANT=bit280` at `CONC=8`, attic on, the busy guard on, the SSD KV store on. Every number in this README is our measurement on four DGX Sparks, or is
 marked as someone else's. Nothing unmeasured is presented as measured; "What is not measured yet" lists the gaps.
+
+## What is new in v3.1
+
+- **Eight chats at once, and a bigger pool: 950,272 tokens** (was 6 chats at 776,704, +22%). Same weights, same
+  bit280 manifest, same image as v3. Only the default dial moves: `CONC=8` (SESS 8, CAP 950,272, attic on). The
+  memory comes from the free room v3 left on each box: the v3 boot kept 11.6-12.1 GiB free under load, and this one
+  keeps 5.4-5.7 GiB free (5 s samples over the whole run).
+- **8 chats: 133.2 tok/s total, 17.9 per chat** (was 103.7 total on v3, where only 6 decoded at once and the other
+  2 waited). The wait for the first token with 8 chats arriving together: **0.39-0.41 s for every chat** (on v3, 6
+  started at 0.31 s and 2 waited 13.5 s for a free slot).
+- **1-4 chats: the same speed as v3.** Single chat code/prose/structured 60.2 / 39.2 / 66.0 tok/s (v3: 59.9 / 39.2 /
+  67.5). C4 99.7 tok/s total, 26.8 per chat on this boot. Correction to v3: our bench gives each run its own prompt
+  nonces, and the v3 row of 110.2 was a warm repeat. With the v3 boot's exact prompts, cold, the two boots are level
+  (96.1 on v3.1, 95.9 on v3).
+- **The v3.1 measured row** — ONE boot, 2026-11-21, on our four Sparks with exactly the `.env.example` settings.
+  RigMark is the median of 3 invocations; the clocks ran 2171-2190 MHz (under the 2250 clean-clock bar, no throttle
+  flags); smoke 14/14, quality panel 12/12, agent replay 24/24 turns with 20/20 warm reuses (warm TTFT p50 6.52 s,
+  p90 10.05 s; v3: 6.58 / 12.3 s); prefill 8K 1,554.7 tok/s (v3: 1,454.7). Attic-off rows are NOT measured at
+  CONC 8 on bit280: with `ATTIC=0` the dial falls back to the TUNE CAP (776,704) and says so.
+- **Less free memory is the trade.** 5.4-5.7 GiB stays free a box under load (v3: 11.6-12.1). If your boxes run other
+  work, keep `CONC=6` (the v3 row is still in `conc.tsv`).
+- Version bumped to 3.1 in `kindling.json`.
 
 ## What is new in v3
 
@@ -130,12 +152,12 @@ shipped bit243/bit260 pattern — it is not a measured KL order**. **KL: pending
 `TUNE` picks one of four sets of settings (`knobs.sh`; the `speed` slot was removed — its two measured knobs were
 no gain). A `VARIANT`, `SESS`, `CAP`, `SHARE_LIMIT` or `KV_FORMAT` you set yourself keeps your value, and anything
 already in `EXTRA_ENV` is kept after the tier's words. The default: `VARIANT=bit280` (KindlingAI's v0.7 manifest, shipped in
-`manifests/exlr8-manifest-bit280.json`) at `CONC=6` — the serving choice. `bit275` (v2) still ships.
+`manifests/exlr8-manifest-bit280.json`) at `CONC=8` — the serving choice. `bit275` (v2) still ships.
 
 The concurrency dial: `CONC=1|2|4|6|8` picks how many requests decode at once and takes the KV cache the freed slots
-give back — `CAP` follows the largest pool a boot at that `SESS` measured holding the serving floor (9 GiB free at
-ready, never under 8 GiB under load). `./glm53 conc` prints this table for your `VARIANT`; a `CAP` you set always
-wins (one above the measured value prints a warning on `./glm53 up`). Measured on bit275 (the v2 rows, release `9372b74d`; the v3 bit280 row is in "What is new in v3"), SHARE_LIMIT 16384
+give back — `CAP` follows the largest pool a boot at that `SESS` measured holding the serving floor (the v2/v3 rows: 9 GiB free at
+ready, never under 8 GiB under load; the v3.1 row: never under 5 GiB under load). `./glm53 conc` prints this table for your `VARIANT`; a `CAP` you set always
+wins (one above the measured value prints a warning on `./glm53 up`). Measured on bit275 (the v2 rows, release `9372b74d`; the bit280 rows are in "What is new in v3.1" and "What is new in v3"), SHARE_LIMIT 16384
 (speed cells cite the attic-on boots: single-chat speed is the same with the reserve layer on or off):
 
 | CONC | attic | CAP (tokens) | pages a rank | tokens per session | single-chat code/prose/structured | C4 | C8 | quality panel | measured |
@@ -156,7 +178,7 @@ Memory: every row held 9 GiB free per box at ready and never went under 8 GiB un
 
 | `TUNE` | sets | you get | status |
 |---|---|---|---|
-| `quality` (default) | `VARIANT=bit280`, `CONC=6`; the lane defaults (attic, the SSD store, the busy guard, `SHARE_LIMIT=16384`) | The exact model's output (temp-0 identical across boots), 6 sessions at the 776,704-token pool. | **Measured** 2026-11-19, one boot ("What is new in v3") |
+| `quality` (default) | `VARIANT=bit280`, `CONC=8`; the lane defaults (attic, the SSD store, the busy guard, `SHARE_LIMIT=16384`) | The exact model's output (temp-0 identical across boots), 8 sessions at the 950,272-token pool. | **Measured** 2026-11-21, one boot ("What is new in v3.1") |
 | `context` | `KV_FORMAT=int4`, `CAP=513536` | The int4 KV trade (gr8 docs/KV4.md: decode −2.3-3.3 %, prefill +5.8 %, temp-0 output moves marginally), a 513,536-token pool. | **Knobs set, not measured** on four Sparks |
 | `agents` | quality's settings and `SHARE_LIMIT=16384` | For agents (long prompts that come back turn after turn). Every rank holds a session's first `SHARE_LIMIT` tokens and a quarter of the rest, so the same 485,376-token pool keeps four 60-70K-token agents at once (1,857 of 2,088 pages a rank) and each warm turn is a prefix hit. Exact output, as quality. The cost: a request over 16,384 tokens (prompt + max_tokens) decodes alone instead of sharing decode steps (over 32,768 at quality). | **Measured** 2026-11-09 (v2 rows, release `9372b74d`; not re-measured on v0.7): the table below |
 | `agents-fast` (opt-in) | `TUNE=agents` and `GR8_REUSE_ALIGN=0` (on `EXTRA_ENV`) | A warm turn prefills only its new tokens: a prefix hit keeps the whole matched prefix instead of whole 4,096-row cells. **Not bit-exact against a cold prefill (gr8 SETTINGS.md)**: a warm turn can get other temp-0 text than the same request sent cold. `knobs.sh` prints that warning on every boot and command, and `./glm53 check-env` before the boot. | **Measured** 2026-11-09 (v2 rows, release `9372b74d`; not re-measured on v0.7): the second table below. Opt-in only, never the default |
@@ -243,8 +265,8 @@ of the backstop, reported separately from the intake path, which stayed sub-seco
 | `TP` | 4 | `4` |
 | `TUNE` | `quality`, `context`, `agents`, `agents-fast` (opt-in, not bit-exact) | `quality` |
 | `VARIANT` | `bit280` (v3 default) or `bit275` (v2), both shipped in `manifests/`, or the release's width manifests: `home` (measured), `bit325`, `bit338`, `up1`, `bit225`, `bit243`, `bit260`, `down1`, or a path to a custom exlr8-v2-manifest JSON | `bit280` (`home` for `context`/`agents`) |
-| `SESS` | requests decoding at once, 1-8 | set by `CONC` (4) |
-| `CONC` | `1`, `2`, `4`, `8`: the concurrency dial. Sets `SESS` and lets `CAP` follow the largest CAP a boot at that SESS measured holding the serving floor (9 GiB free at ready, never under 8 GiB under load) — fewer slots, more KV cache per session (`./glm53 conc` prints the measured table for your `VARIANT`, split by the `attic` column). A `CAP` you set keeps your value; one above the measured value warns (it is not refused). A pair with no measured row falls back to `SESS=CONC` and the `TUNE`'s `CAP`, with a stderr line | `4` |
+| `SESS` | requests decoding at once, 1-8 | set by `CONC` (8) |
+| `CONC` | `1`, `2`, `4`, `6`, `8`: the concurrency dial. Sets `SESS` and lets `CAP` follow the largest CAP a boot at that SESS measured holding the serving floor (the `conc.tsv` header: 9 GiB free at ready and never under 8 GiB under load for the older rows, never under 5 GiB under load for the v3.1 row) — fewer slots, more KV cache per session (`./glm53 conc` prints the measured table for your `VARIANT`, split by the `attic` column). A `CAP` you set keeps your value; one above the measured value warns (it is not refused). A pair with no measured row falls back to `SESS=CONC` and the `TUNE`'s `CAP`, with a stderr line | `4` |
 | `ATTIC` | `1`: boot with the memory-reserve layer ([spark-attic](https://github.com/bertholomus/spark-attic)) lending each rank its display-carveout slice (`compose.attic.yaml` is added to the compose files, and the `CONC` rows with `attic on` apply). Needs `GR8_IMAGE` to name an image **with** the attic client — the pinned `ghcr.io/kindlingai/gr8:sha-e231adb` has none and `ATTIC=1` is refused with the fix named. The gr8 attic client is not in a published gr8 image yet: `ATTIC=1` needs a gr8 build that includes it | `0` |
 | `BUSY` | `1`: the busy guard. When granting a request would evict a retained run whose session is not idle (no request in flight and its last response ended under `BUSY_IDLE_SECS` ago), the head refuses it at once with HTTP 429, an OpenAI-shaped error body and `Retry-After` (`BUSY_RETRY_AFTER`) — instead of evicting the run (that agent then sits out a full re-prefill, minutes of silence) or queueing the request in silence. `BUSY_QUEUE_MAX` refuses arrivals once this many are already queued past the free session slots. A turn that continues its own retained run is never refused. v2.1: the pinned stock image ships the guard (gr8 PR #516, merge `5625ed6`); `knobs.sh` verifies the image by digest or its knob table and refuses `BUSY=1` on an image without it | `0` |
 | `BUSY_IDLE_SECS` | `BUSY=1`: a session counts as idle when it has no request in flight and its last response ended at least this many seconds ago; only idle sessions' retained runs are evicted. Tune it from your agents' tool-call gaps | recipe 60 (gr8 60); `120` for agent lanes whose clients obey `Retry-After` |
