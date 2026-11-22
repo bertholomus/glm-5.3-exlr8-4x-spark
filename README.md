@@ -16,6 +16,34 @@ default) so a stop keeps chats for the next boot.
 **Default:** `VARIANT=bit280` at `CONC=8`, attic on, the busy guard on, the SSD KV store on. Every number in this README is our measurement on four DGX Sparks, or is
 marked as someone else's. Nothing unmeasured is presented as measured; "What is not measured yet" lists the gaps.
 
+## What is new in v3.2
+
+- **Rebased on gr8 97089b3, after KindlingAI's gr8 v1.1.0.** The stock image pin moves to
+  `ghcr.io/kindlingai/gr8:sha-97089b3@sha256:717168f9afff1538c49383502e662fb45bd34d23630ac00f4d88fb1502b2fe4c`
+  (was ca7e874). The engine work is theirs: gr8 v1.1.0 turns on its tuned TP=4 kernels and caps the MoE expert
+  union per step at 48 (`MOE_UNION_CAP=48`, the image's own TP=4 default), and later commits add capacity-scaled
+  CP sharding in RAM. The recipe sets no new engine knob; the default lane runs the attic build of this image
+  (`gr8:97089b3-attic`, gr8 97089b3 + the attic client); the attic client is still NOT in any published gr8 image.
+  Same weights (release v0.7 `9e25c28a`) and the same bit280 manifest as v3.1.
+- **8 chats: 173.5 tok/s total, 23.0 per chat** (was 133.2 total, 17.9 per chat on v3.1, +30%). First token with 8
+  chats arriving together: 0.38 s for every chat (v3.1: 0.39-0.41 s).
+- **A bigger pool: 1,048,576 tokens** at `CONC=8` (was 950,272, +10%). `max_model_len` 1,048,562. The new engine
+  also leaves more memory free: **9.0-9.3 GiB free a box at the lowest point under load** (v3.1: 5.4-5.7), so the
+  bigger pool costs nothing against the v3.1 floor.
+- **Single chat code/prose/structured 61.7 / 39.7 / 79.7 tok/s** (v3.1: 60.2 / 39.2 / 66.0). Structured output is
+  +21%; code and prose are level.
+- **4 chats:** RigMark C4 115.4 tok/s total, 30.0 per chat (the v3.1 boot: 99.7). With the v3 boot's exact prompts,
+  cold, the gain is smaller: 99.0 vs 96.1 on v3.1 (+3%). We count that as the like-for-like row.
+- **Agents:** agent replay 24/24 turns with 20/20 warm reuses; warm TTFT p50 5.95 s, p90 7.81 s (v3.1: 6.52 / 10.05 s).
+- **The v3.2 measured row** — ONE boot, 2026-11-21, on our four Sparks with exactly the `.env.example` settings.
+  RigMark is the median of 3 invocations; the clocks ran 2171-2190 MHz (under the 2250 clean-clock bar, no throttle
+  flags, the same as the v3.1 boot); smoke passed, quality panel 12/12. A second boot of the same settings (the switch of
+  our own lane) passed smoke and the panel 12/12 again and held 9.3-10.5 GiB free a box.
+- **Honest rows:** prefill 8K 1,527.7 tok/s on gr8's own bench (v3.1: 1,554.7, -1.7%). The C8 gain is one boot.
+  Attic-off rows are still NOT measured at CONC 8 on bit280.
+- `conc.tsv`: the bit280 CONC 8 attic row is now this boot (CAP 1,048,576, 4,288 pages a rank, 84,992 tokens a
+  session); the v3.1 row it replaces is described above. Version bumped to 3.2 in `kindling.json`.
+
 ## What is new in v3.1
 
 - **Eight chats at once, and a bigger pool: 950,272 tokens** (was 6 chats at 776,704, +22%). Same weights, same
@@ -156,8 +184,8 @@ already in `EXTRA_ENV` is kept after the tier's words. The default: `VARIANT=bit
 
 The concurrency dial: `CONC=1|2|4|6|8` picks how many requests decode at once and takes the KV cache the freed slots
 give back — `CAP` follows the largest pool a boot at that `SESS` measured holding the serving floor (the v2/v3 rows: 9 GiB free at
-ready, never under 8 GiB under load; the v3.1 row: never under 5 GiB under load). `./glm53 conc` prints this table for your `VARIANT`; a `CAP` you set always
-wins (one above the measured value prints a warning on `./glm53 up`). Measured on bit275 (the v2 rows, release `9372b74d`; the bit280 rows are in "What is new in v3.1" and "What is new in v3"), SHARE_LIMIT 16384
+ready, never under 8 GiB under load; the v3.1 and v3.2 rows: never under 5 GiB under load). `./glm53 conc` prints this table for your `VARIANT`; a `CAP` you set always
+wins (one above the measured value prints a warning on `./glm53 up`). Measured on bit275 (the v2 rows, release `9372b74d`; the bit280 rows are in "What is new in v3.2", "What is new in v3.1" and "What is new in v3"), SHARE_LIMIT 16384
 (speed cells cite the attic-on boots: single-chat speed is the same with the reserve layer on or off):
 
 | CONC | attic | CAP (tokens) | pages a rank | tokens per session | single-chat code/prose/structured | C4 | C8 | quality panel | measured |
@@ -178,7 +206,7 @@ Memory: every row held 9 GiB free per box at ready and never went under 8 GiB un
 
 | `TUNE` | sets | you get | status |
 |---|---|---|---|
-| `quality` (default) | `VARIANT=bit280`, `CONC=8`; the lane defaults (attic, the SSD store, the busy guard, `SHARE_LIMIT=16384`) | The exact model's output (temp-0 identical across boots), 8 sessions at the 950,272-token pool. | **Measured** 2026-11-21, one boot ("What is new in v3.1") |
+| `quality` (default) | `VARIANT=bit280`, `CONC=8`; the lane defaults (attic, the SSD store, the busy guard, `SHARE_LIMIT=16384`) | The exact model's output (temp-0 identical across boots), 8 sessions at the 1,048,576-token pool. | **Measured** 2026-11-21, one boot ("What is new in v3.2") |
 | `context` | `KV_FORMAT=int4`, `CAP=513536` | The int4 KV trade (gr8 docs/KV4.md: decode −2.3-3.3 %, prefill +5.8 %, temp-0 output moves marginally), a 513,536-token pool. | **Knobs set, not measured** on four Sparks |
 | `agents` | quality's settings and `SHARE_LIMIT=16384` | For agents (long prompts that come back turn after turn). Every rank holds a session's first `SHARE_LIMIT` tokens and a quarter of the rest, so the same 485,376-token pool keeps four 60-70K-token agents at once (1,857 of 2,088 pages a rank) and each warm turn is a prefix hit. Exact output, as quality. The cost: a request over 16,384 tokens (prompt + max_tokens) decodes alone instead of sharing decode steps (over 32,768 at quality). | **Measured** 2026-11-09 (v2 rows, release `9372b74d`; not re-measured on v0.7): the table below |
 | `agents-fast` (opt-in) | `TUNE=agents` and `GR8_REUSE_ALIGN=0` (on `EXTRA_ENV`) | A warm turn prefills only its new tokens: a prefix hit keeps the whole matched prefix instead of whole 4,096-row cells. **Not bit-exact against a cold prefill (gr8 SETTINGS.md)**: a warm turn can get other temp-0 text than the same request sent cold. `knobs.sh` prints that warning on every boot and command, and `./glm53 check-env` before the boot. | **Measured** 2026-11-09 (v2 rows, release `9372b74d`; not re-measured on v0.7): the second table below. Opt-in only, never the default |
@@ -277,7 +305,7 @@ of the backstop, reported separately from the intake path, which stayed sub-seco
 | `KV_STORE` | `ssd:<dir>,size=200G,persist=on,keep=sessions`: at an orderly stop the engine writes open chats to the SSD; the next boot restores their KV. An **opt-in tier** in v2 | off by default; uncomment the two lines in `.env.example` (see ["Switching"](#switching-and-the-ssd-kv-store-tier-opt-in)) |
 | `GR8_STOP_GRACE` | docker's stop grace, read by `compose.yaml` | `150s` — set it when the SSD KV store tier is on, or docker kills the engine mid-store |
 | `MENTAT` | `0`: the boxes in `PEERS`. `1`: find the boxes through the host's `mentat` daemon and register the API in group `GROUP` | `0` |
-| `GR8_IMAGE` | the pinned image, read by `compose.yaml` | `ghcr.io/kindlingai/gr8:sha-ca7e874@sha256:d140aca3...` (`.env.example` sets `gr8:ca7e874-attic`, your attic build) |
+| `GR8_IMAGE` | the pinned image, read by `compose.yaml` | `ghcr.io/kindlingai/gr8:sha-97089b3@sha256:717168f9...` (`.env.example` sets `gr8:97089b3-attic`, your attic build) |
 | `MODEL`, `DRAFTER` | the release and the drafter, each pinned to a Hugging Face commit | the commits measured above (`./fetch --print` prints them) |
 | `EXTRA_ENV` | engine settings, `NAME=value` pairs separated by spaces | `GR8_GEN_CACHE=/var/lib/gr8/cache/gen-cache` |
 

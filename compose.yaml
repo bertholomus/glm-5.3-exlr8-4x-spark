@@ -18,7 +18,7 @@ services:
   gr8:
     build:
       context: .
-    image: ${GR8_IMAGE:-ghcr.io/kindlingai/gr8:sha-ca7e874@sha256:d140aca32886d2055b7ff11d88c8860c6bb9c108c626f8f3a4f3cebdfe5fcfc6}
+    image: ${GR8_IMAGE:-ghcr.io/kindlingai/gr8:sha-97089b3@sha256:717168f9afff1538c49383502e662fb45bd34d23630ac00f4d88fb1502b2fe4c}
     container_name: glm53-4x-spark
     # The knobs (TUNE, VARIANT, SESS, CAP, KV_STORE, EXTRA_ENV, MENTAT; README.md) come from .env. Unset, the
     # launcher's defaults apply, with TUNE=quality's settings from knobs.sh.

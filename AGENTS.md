@@ -88,7 +88,7 @@ the int4 KV knobs (rows on this rig not yet measured).
 
 | `TUNE` | the settings it sets (`knobs.sh`) | what it gives |
 |---|---|---|
-| `quality` (default) | `VARIANT=bit280`, `CONC=8` (SESS=8, CAP 950,272 with `ATTIC=1`), the lane defaults in `.env.example` | the exact model's output: temp-0 replies identical across boots (gr8 checks this itself); 8 sessions; a 950,272-token pool with `ATTIC=1` |
+| `quality` (default) | `VARIANT=bit280`, `CONC=8` (SESS=8, CAP 1,048,576 with `ATTIC=1`), the lane defaults in `.env.example` | the exact model's output: temp-0 replies identical across boots (gr8 checks this itself); 8 sessions; a 1,048,576-token pool with `ATTIC=1` |
 | `context` | `VARIANT=home SESS=8 CAP=513536 KV_FORMAT=int4` | the int4 KV trade (gr8 docs/KV4.md), a 513,536-token pool; rows on this rig pending |
 | `agents` | `VARIANT=home SESS=8 CAP=485376 SHARE_LIMIT=16384` | for agents: four 60-70K-token agents stay in the pool at once, each warm turn a prefix hit; exact output as quality; a request over 16,384 tokens (prompt + max_tokens) decodes alone. Measured 2026-11-09 |
 | `agents-fast` (opt-in) | `agents` + `EXTRA_ENV` word `GR8_REUSE_ALIGN=0` | a warm turn prefills only its new tokens (warm-turn TTFT p50 3.4 s against 5.9 s); not bit-exact against a cold prefill (gr8 SETTINGS.md), and `knobs.sh` prints that warning. Measured 2026-11-09 |
@@ -104,7 +104,7 @@ Every value also carries the recipe defaults from `.env.example`:
   sets both from the measured table (`./glm53 conc` prints it).
 - `BUSY=1` (on in `.env.example`, the measured lane): the busy guard. A request that would evict a live session's
   cache gets HTTP 429 + `Retry-After` instead. The pinned stock image ships the guard (gr8 PR #516, merged before
-  ca7e874), so no custom build; `knobs.sh` verifies the image (known-good digest, or its knob table carries
+  ca7e874 and the v3.2 pin 97089b3), so no custom build; `knobs.sh` verifies the image (known-good digest, or its knob table carries
   `GR8_BUSY_GUARD`) and refuses `BUSY=1` on an image without it, naming the fix. v3 defaults: BUSY_IDLE_SECS 60, BUSY_RETRY_AFTER 60
   (the measured lane). For clients that obey `Retry-After`, set `BUSY_IDLE_SECS=120 BUSY_RETRY_AFTER=20`: a refused
   probe does not refresh the session's idle clock, so a client backed off at or above the idle bound loses its own
@@ -144,7 +144,7 @@ Every knob:
 | `GR8_STOP_GRACE` | docker's stop grace period, needed with `KV_STORE` | off (`150s` with the store) |
 | `MENTAT` | `0`: the boxes in `PEERS`. `1`: find the boxes through the host's `mentat` daemon and register the API | `0` |
 | `GROUP` | the `mentat` group | `gr8-glm53-4x` |
-| `GR8_IMAGE` | the pinned image, read by compose | `ghcr.io/kindlingai/gr8:sha-ca7e874@sha256:d140aca3...` (`ATTIC=1` needs your attic build, e.g. `gr8:ca7e874-attic`) |
+| `GR8_IMAGE` | the pinned image, read by compose | `ghcr.io/kindlingai/gr8:sha-97089b3@sha256:717168f9...` (`ATTIC=1` needs your attic build, e.g. `gr8:97089b3-attic`) |
 | `GR8_CACHE`, `GR8_HOME` | compose only: host directories in place of the `cache` and `home` volumes, owned by uid 1000 | the named volumes |
 | `MODEL`, `DRAFTER` | the release and drafter, pinned to Hugging Face commits (`./fetch --print` prints the pins) | the commits measured in README.md |
 | `FETCH_JOBS` | files the fetch takes at once | `8` |
