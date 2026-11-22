@@ -16,6 +16,20 @@ default) so a stop keeps chats for the next boot.
 **Default:** `VARIANT=bit280` at `CONC=8`, attic on, the busy guard on, the SSD KV store on. Every number in this README is our measurement on four DGX Sparks, or is
 marked as someone else's. Nothing unmeasured is presented as measured; "What is not measured yet" lists the gaps.
 
+## What is new in v3.2.1
+
+- **gr8 v1.1.1.** The stock image pin moves to
+  `ghcr.io/kindlingai/gr8:v1.1.1@sha256:fa5c9f66fbfa55d162782578b3262893b782e6365a76562bcab951b54acc6d96`
+  (gr8 a3f44a0, was 97089b3). KindlingAI's v1.1.1 fixes garbled TP=4 output (#557: prefill waits for the context-parallel
+  staged index pool, and RDMA receive slots are read uncached). Their fix, validated by them on 4x GB10 with 4
+  concurrent multi-turn sessions at 185K-195K tokens. The default lane runs `gr8:a3f44a0-attic` (v1.1.1 + the attic
+  client). Nothing else changes: same weights, bit280, CONC 8, 1,048,576-token pool.
+- **Checked on our four Sparks, one boot, 2026-11-22**, exactly the `.env.example` settings: smoke passed, quality panel
+  12/12 with the same reply hashes as v3.2, agent replay 24/24 turns with 20/20 warm reuses (warm TTFT p50 6.75 s),
+  C4 with the v3 boot's exact prompts, cold, 101.5 tok/s (v3.2: 99.0), 9.1-10.3 GiB free a box under load.
+- **Not re-measured on v1.1.1:** the RigMark speed rows (8 chats, single chat). The v3.2 numbers below were measured on
+  97089b3; v1.1.1 changes only the prefill synchronization above.
+
 ## What is new in v3.2
 
 - **Rebased on gr8 97089b3, after KindlingAI's gr8 v1.1.0.** The stock image pin moves to
@@ -305,7 +319,7 @@ of the backstop, reported separately from the intake path, which stayed sub-seco
 | `KV_STORE` | `ssd:<dir>,size=200G,persist=on,keep=sessions`: at an orderly stop the engine writes open chats to the SSD; the next boot restores their KV. An **opt-in tier** in v2 | off by default; uncomment the two lines in `.env.example` (see ["Switching"](#switching-and-the-ssd-kv-store-tier-opt-in)) |
 | `GR8_STOP_GRACE` | docker's stop grace, read by `compose.yaml` | `150s` — set it when the SSD KV store tier is on, or docker kills the engine mid-store |
 | `MENTAT` | `0`: the boxes in `PEERS`. `1`: find the boxes through the host's `mentat` daemon and register the API in group `GROUP` | `0` |
-| `GR8_IMAGE` | the pinned image, read by `compose.yaml` | `ghcr.io/kindlingai/gr8:sha-97089b3@sha256:717168f9...` (`.env.example` sets `gr8:97089b3-attic`, your attic build) |
+| `GR8_IMAGE` | the pinned image, read by `compose.yaml` | `ghcr.io/kindlingai/gr8:v1.1.1@sha256:fa5c9f66...` (`.env.example` sets `gr8:a3f44a0-attic`, your attic build) |
 | `MODEL`, `DRAFTER` | the release and the drafter, each pinned to a Hugging Face commit | the commits measured above (`./fetch --print` prints them) |
 | `EXTRA_ENV` | engine settings, `NAME=value` pairs separated by spaces | `GR8_GEN_CACHE=/var/lib/gr8/cache/gen-cache` |
 
