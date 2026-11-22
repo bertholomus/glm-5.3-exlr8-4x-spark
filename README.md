@@ -20,7 +20,7 @@ marked as someone else's. Nothing unmeasured is presented as measured; "What is 
 
 - **gr8 v1.1.1.** The stock image pin moves to
   `ghcr.io/kindlingai/gr8:v1.1.1@sha256:fa5c9f66fbfa55d162782578b3262893b782e6365a76562bcab951b54acc6d96`
-  (gr8 a3f44a0, was 97089b3). KindlingAI's v1.1.1 fixes garbled TP=4 output (#557: prefill waits for the context-parallel
+  (gr8 a3f44a0, was 97089b3). KindlingAI's (Matt Mastracci @mmastrac, Chuck @ck2084, Steve @coffeedev) v1.1.1 fixes garbled TP=4 output (#557: prefill waits for the context-parallel
   staged index pool, and RDMA receive slots are read uncached). Their fix, validated by them on 4x GB10 with 4
   concurrent multi-turn sessions at 185K-195K tokens. The default lane runs `gr8:a3f44a0-attic` (v1.1.1 + the attic
   client). Nothing else changes: same weights, bit280, CONC 8, 1,048,576-token pool.
@@ -460,6 +460,10 @@ evicted run.
   ("evict a session that is idle for > N s; if none are idle then 429").
 - **Chuck** ([@ck2084](https://x.com/ck2084), KindlingAI; GitHub [chuck-ads](https://github.com/chuck-ads) /
   [adapt-ai-systems](https://github.com/adapt-ai-systems)) — the persist=on SSD KV store and the session keep it runs on (kindlingai/gr8 #397, #417, #145, #118).
+- **Steve** ([@coffeedev](https://x.com/coffeedev), KindlingAI; GitHub [coffee-the-dev](https://github.com/coffee-the-dev)) — KindlingAI's exlr8
+  quant work since day one: the exlr8enc encoder and gr8 (kindlingai/exlr8enc, kindlingai/gr8), and a named contributor on the
+  [`glm-5.3-exlr8-k2-k3-k4`](https://huggingface.co/kindlingai/glm-5.3-exlr8-k2-k3-k4) release this recipe serves.
+- The exlr8 weights and the gr8 engine are KindlingAI's: Matt Mastracci (@mmastrac), Chuck (@ck2084) and Steve (@coffeedev).
 
 ## CI
 
