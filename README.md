@@ -16,6 +16,57 @@ default) so a stop keeps chats for the next boot.
 **Default:** `VARIANT=bit280` at `CONC=8`, attic on, the busy guard on, the SSD KV store on. Every number in this README is our measurement on four DGX Sparks, or is
 marked as someone else's. Nothing unmeasured is presented as measured; "What is not measured yet" lists the gaps.
 
+## What is new in v3.3
+
+- **Engine: gr8 v1.2.0 plus two long-prompt fixes, now merged into gr8 main (#612, #613).** This is KindlingAI's
+  work as one team: Matt Mastracci ([@mmastrac](https://x.com/mmastrac)), Chuck ([@ck2084](https://x.com/ck2084)),
+  Steve ([@coffeedev](https://x.com/coffeedev)) and Albert Lee. Both fixes went into kindlingai/gr8 main on 2026-11-24
+  (PT). No published gr8 image or release carries them yet, so the default image `gr8:v120-attic-a1a4` is a build you
+  make from:
+  - gr8 **v1.2.0** (`ab2eb95f`; the stock pin is now
+    `ghcr.io/kindlingai/gr8:v1.2.0@sha256:3de05aab8cda21fd5d6b4af89ccdba6ff5abdbd704729601fd348fa638ade9fd`, was
+    v1.1.1 `a3f44a0`): the KindlingAI GLM-5.3 TP=4 work, #582;
+  - kindlingai/gr8 **#612** (`d4af92d5`): page-table uploads for long chats are batched, so the context-parallel
+    page-table rebuild takes under 1 ms (worst case on our boots: 396.6 ms -> 0.64 ms);
+  - kindlingai/gr8 **#613** (`77e82fef`): a long chat's KV tail is extended in place instead of stored again, so a
+    long chat stops rewriting its own KV to the SSD store;
+  - the attic client `f5e0bdc4` ([spark-attic](https://github.com/bertholomus/spark-attic); still not in any published
+    gr8 image).
+
+  ```bash
+  git clone https://github.com/kindlingai/gr8 && cd gr8
+  git checkout -b v120-attic-a1a4 ab2eb95f               # gr8 v1.2.0
+  git cherry-pick d4af92d5 77e82fef                      # #612, #613 (gr8 main)
+  git fetch https://github.com/bertholomus/gr8 attic-client-v1.2.0 && git cherry-pick f5e0bdc4   # the attic client
+  docker buildx build --platform linux/arm64 --load -t gr8:v120-attic-a1a4 .
+  ```
+
+  That source is the one we measured, line for line in every engine file; only the order of two credit lines in gr8's
+  `CREDITS.md` and `README.md` differs. Our measured image was the pinned stock v1.2.0 image with gr8's engine and knob
+  library rebuilt from this source; its two KV-store helper binaries came from an earlier v1.2.0 build without #613. #614, also merged into gr8 main, is the spark-attic client path through gr8's own display-memory
+  lease; this recipe does not use it yet, and it is not what we measured.
+- **Measured: v3.2.1 vs v3.3, four fresh boots A,B,B,A on our four DGX Sparks**, the `.env.example` settings (attic on,
+  bit280, `CONC=8` at the 1,048,576-token pool, fp8 KV, busy guard on, stock MTP + DFlash2 drafting; the SSD KV store
+  ran with `persist=off` and was cleared each boot, so no boot started warm). Median of the two boots a side:
+  - **first token on a cold long prompt (140,860 tokens): 104.12 s -> 91.63 s (-12.0%)**
+  - **the warm follow-up turn on that chat: 5.23 s -> 2.27 s (2.3x faster)**
+  - SSD spills during the run: 3,370 pages a boot -> **0**
+  - lowest free memory a box at boot: 9.48 -> 10.28 GiB (**+0.80 GiB**); after the bench: 10.03 -> 10.60 GiB
+  - every boot: smoke 14/14, quality panel 12/12, count-200 200/200, 128K needle pass, warm = cold 16/16; the 4-chat
+    greedy replies are identical across the two v3.3 boots (16/16)
+- **The trade: decode with several chats is a little slower on our four-box mesh.** It comes from the gr8
+  v1.2.0 router change (#582), not from the two merged fixes: stock v1.2.0 alone lost about the same here (4 chats,
+  same prompts: -4.5% cold, -5.4% warm, in an earlier A,B,B,A on this mesh).
+  #582 also changes greedy tokens, so v3.3 replies differ from v3.2.1 replies at temperature 0 (the same as stock
+  v1.2.0). Total decode tok/s:
+  - 4 chats, same prompts as v3.2.1: cold 101.07 -> 96.96 (-4.1%), warm 117.31 -> 111.18 (-5.2%); both 95% CIs cross
+    zero (-8.5% to +2.7%, -9.7% to +2.8%)
+  - 4 short chats: 93.44 -> 91.24 (-2.4%); 8 short chats: 135.08 -> 134.78 (-0.2%)
+  - 1 short chat: 53.22 -> 47.47 (-10.8%, 95% CI -17.7% to +7.7%: noisy, 4 passes a side)
+- **Not changed:** the weights (release v0.7 `9e25c28a`), bit280, the `CONC` dial and `conc.tsv` rows, every knob.
+- **Not re-measured on v3.3:** the single-chat code/prose/structured rows, prefill 8K and agent replay. The tables
+  below come from the builds they name.
+
 ## What is new in v3.2.1
 
 - **gr8 v1.1.1.** The stock image pin moves to
@@ -309,7 +360,7 @@ of the backstop, reported separately from the intake path, which stayed sub-seco
 | `VARIANT` | `bit280` (v3 default) or `bit275` (v2), both shipped in `manifests/`, or the release's width manifests: `home` (measured), `bit325`, `bit338`, `up1`, `bit225`, `bit243`, `bit260`, `down1`, or a path to a custom exlr8-v2-manifest JSON | `bit280` (`home` for `context`/`agents`) |
 | `SESS` | requests decoding at once, 1-8 | set by `CONC` (8) |
 | `CONC` | `1`, `2`, `4`, `6`, `8`: the concurrency dial. Sets `SESS` and lets `CAP` follow the largest CAP a boot at that SESS measured holding the serving floor (the `conc.tsv` header: 9 GiB free at ready and never under 8 GiB under load for the older rows, never under 5 GiB under load for the v3.1 row) — fewer slots, more KV cache per session (`./glm53 conc` prints the measured table for your `VARIANT`, split by the `attic` column). A `CAP` you set keeps your value; one above the measured value warns (it is not refused). A pair with no measured row falls back to `SESS=CONC` and the `TUNE`'s `CAP`, with a stderr line | `4` |
-| `ATTIC` | `1`: boot with the memory-reserve layer ([spark-attic](https://github.com/bertholomus/spark-attic)) lending each rank its display-carveout slice (`compose.attic.yaml` is added to the compose files, and the `CONC` rows with `attic on` apply). Needs `GR8_IMAGE` to name an image **with** the attic client — the pinned `ghcr.io/kindlingai/gr8:sha-e231adb` has none and `ATTIC=1` is refused with the fix named. The gr8 attic client is not in a published gr8 image yet: `ATTIC=1` needs a gr8 build that includes it | `0` |
+| `ATTIC` | `1`: boot with the memory-reserve layer ([spark-attic](https://github.com/bertholomus/spark-attic)) lending each rank its display-carveout slice (`compose.attic.yaml` is added to the compose files, and the `CONC` rows with `attic on` apply). Needs `GR8_IMAGE` to name an image **with** the attic client — the pinned stock `ghcr.io/kindlingai/gr8:v1.2.0` has none (v3.3 default: `gr8:v120-attic-a1a4`, "What is new in v3.3") and `ATTIC=1` is refused with the fix named. The gr8 attic client is not in a published gr8 image yet: `ATTIC=1` needs a gr8 build that includes it | `0` |
 | `BUSY` | `1`: the busy guard. When granting a request would evict a retained run whose session is not idle (no request in flight and its last response ended under `BUSY_IDLE_SECS` ago), the head refuses it at once with HTTP 429, an OpenAI-shaped error body and `Retry-After` (`BUSY_RETRY_AFTER`) — instead of evicting the run (that agent then sits out a full re-prefill, minutes of silence) or queueing the request in silence. `BUSY_QUEUE_MAX` refuses arrivals once this many are already queued past the free session slots. A turn that continues its own retained run is never refused. v2.1: the pinned stock image ships the guard (gr8 PR #516, merge `5625ed6`); `knobs.sh` verifies the image by digest or its knob table and refuses `BUSY=1` on an image without it | `0` |
 | `BUSY_IDLE_SECS` | `BUSY=1`: a session counts as idle when it has no request in flight and its last response ended at least this many seconds ago; only idle sessions' retained runs are evicted. Tune it from your agents' tool-call gaps | recipe 60 (gr8 60); `120` for agent lanes whose clients obey `Retry-After` |
 | `BUSY_RETRY_AFTER` | `BUSY=1`: the seconds in a refused request's `Retry-After` header and error body. Keep it under `BUSY_IDLE_SECS` for clients that obey `Retry-After` (v3 defaults to the measured lane's 60/60 and prints a WARNING on every boot): a refused probe does not refresh the session's idle clock, so a client that obeys `Retry-After` and backs off at or above the idle bound loses its own run before the retry arrives. For such agent lanes set `BUSY_IDLE_SECS=120 BUSY_RETRY_AFTER=20` | recipe 60 (gr8 upstream 60); `20` with `BUSY_IDLE_SECS=120` |
@@ -319,7 +370,7 @@ of the backstop, reported separately from the intake path, which stayed sub-seco
 | `KV_STORE` | `ssd:<dir>,size=200G,persist=on,keep=sessions`: at an orderly stop the engine writes open chats to the SSD; the next boot restores their KV. An **opt-in tier** in v2 | off by default; uncomment the two lines in `.env.example` (see ["Switching"](#switching-and-the-ssd-kv-store-tier-opt-in)) |
 | `GR8_STOP_GRACE` | docker's stop grace, read by `compose.yaml` | `150s` — set it when the SSD KV store tier is on, or docker kills the engine mid-store |
 | `MENTAT` | `0`: the boxes in `PEERS`. `1`: find the boxes through the host's `mentat` daemon and register the API in group `GROUP` | `0` |
-| `GR8_IMAGE` | the pinned image, read by `compose.yaml` | `ghcr.io/kindlingai/gr8:v1.1.1@sha256:fa5c9f66...` (`.env.example` sets `gr8:a3f44a0-attic`, your attic build) |
+| `GR8_IMAGE` | the pinned image, read by `compose.yaml` | `ghcr.io/kindlingai/gr8:v1.2.0@sha256:3de05aab...` (`.env.example` sets `gr8:v120-attic-a1a4`, your attic build) |
 | `MODEL`, `DRAFTER` | the release and the drafter, each pinned to a Hugging Face commit | the commits measured above (`./fetch --print` prints them) |
 | `EXTRA_ENV` | engine settings, `NAME=value` pairs separated by spaces | `GR8_GEN_CACHE=/var/lib/gr8/cache/gen-cache` |
 

@@ -45,12 +45,12 @@ unset _c
 AGENTS_FAST_WARNING="WARNING: TUNE=agents-fast sets GR8_REUSE_ALIGN=0: not bit-exact against a cold prefill (gr8 \
 SETTINGS.md). A warm turn can get other temp-0 text than the same request sent cold. TUNE=agents keeps exact output."
 
-# The stock image pin (v3.2.1): gr8 v1.1.1 (a3f44a0; v1.1.0 + the TP=4 prefill fix #557; the busy guard of PR #516 is
-# in it). The default lane runs ATTIC=1 and names a build of this image WITH the attic client
-# (GR8_IMAGE=gr8:a3f44a0-attic; the attic client is not in any published gr8 image).
-GR8_IMAGE_V3="ghcr.io/kindlingai/gr8:v1.1.1@sha256:fa5c9f66fbfa55d162782578b3262893b782e6365a76562bcab951b54acc6d96"
-# Images known to ship the busy guard (gr8 PR #516, merged before the v3 pin ca7e874 and the v3.2/v3.2.1 pins). Override with your own verified build.
-BUSY_KNOWN_GOOD_DIGESTS="${BUSY_KNOWN_GOOD_DIGESTS:-sha256:fa5c9f66fbfa55d162782578b3262893b782e6365a76562bcab951b54acc6d96 sha256:717168f9afff1538c49383502e662fb45bd34d23630ac00f4d88fb1502b2fe4c sha256:d140aca32886d2055b7ff11d88c8860c6bb9c108c626f8f3a4f3cebdfe5fcfc6}"
+# The stock image pin (v3.3): gr8 v1.2.0 (ab2eb95; the KindlingAI GLM-5.3 TP=4 work #582; the busy guard of PR #516 is
+# in it). The default lane runs ATTIC=1 and names a gr8 build WITH the attic client (GR8_IMAGE=gr8:v120-attic-a1a4:
+# v1.2.0 + #612 and #613 from gr8 main + the attic client; the attic client is not in any published gr8 image).
+GR8_IMAGE_V3="ghcr.io/kindlingai/gr8:v1.2.0@sha256:3de05aab8cda21fd5d6b4af89ccdba6ff5abdbd704729601fd348fa638ade9fd"
+# Images known to ship the busy guard (gr8 PR #516, merged before the v3 pin ca7e874 and the v3.2/v3.2.1/v3.3 pins). Override with your own verified build.
+BUSY_KNOWN_GOOD_DIGESTS="${BUSY_KNOWN_GOOD_DIGESTS:-sha256:3de05aab8cda21fd5d6b4af89ccdba6ff5abdbd704729601fd348fa638ade9fd sha256:fa5c9f66fbfa55d162782578b3262893b782e6365a76562bcab951b54acc6d96 sha256:717168f9afff1538c49383502e662fb45bd34d23630ac00f4d88fb1502b2fe4c sha256:d140aca32886d2055b7ff11d88c8860c6bb9c108c626f8f3a4f3cebdfe5fcfc6}"
 
 # The concurrency dial: CONC=1|2|4|6|8 sets SESS and lets
 # CAP follow the largest CAP a boot at that SESS measured holding the serving floor (conc.tsv: the older rows held
@@ -78,7 +78,7 @@ if [ -n "${CONC:-}" ] || [ -n "${ATTIC:-}" ]; then
   # before any boot, with the fix named (the recipe cannot build that image for you; it is a local build)
   if [ "${ATTIC:-0}" = 1 ]; then
     conc_attic_image_ok "${GR8_IMAGE:-$GR8_IMAGE_V3}" \
-      || { echo "ATTIC=1 needs an image with the memory-reserve client (GR8_IMAGE=${GR8_IMAGE:-$GR8_IMAGE_V3} has none; e.g. GR8_IMAGE=gr8:a3f44a0-attic, a gr8 build of the pinned stock image with the attic client), and compose.attic.yaml on the boot" >&2; exit 2; }
+      || { echo "ATTIC=1 needs an image with the memory-reserve client (GR8_IMAGE=${GR8_IMAGE:-$GR8_IMAGE_V3} has none; e.g. GR8_IMAGE=gr8:v120-attic-a1a4, the README's v3.3 gr8 build with the attic client), and compose.attic.yaml on the boot" >&2; exit 2; }
     attic_words="GR8_ATTIC_SOCK=/run/spark-attic/attic.sock GR8_ATTIC_KEY_FILE=/run/gr8-attic/key"
   fi
   conc_apply "$CONC" "${VARIANT:-bit280}" "${CAP:-776704}" "$conc_user_cap" "${ATTIC:-0}" || exit 2
@@ -144,7 +144,7 @@ case "${BUSY:-0}" in
   0) ;;
   1)
     busy_img_has_guard "${GR8_IMAGE:-$GR8_IMAGE_V3}" || {
-      echo "BUSY=1 needs an image with the busy guard (GR8_IMAGE=${GR8_IMAGE:-$GR8_IMAGE_V3} is not verified to carry one; pin the stock build GR8_IMAGE=$GR8_IMAGE_V3, gr8 PR #516 merged before ca7e874 and v1.1.1, or set BUSY_KNOWN_GOOD_DIGESTS to a build you verified against its knob table), and GR8_BUSY_* ride EXTRA_ENV" >&2; exit 2; }
+      echo "BUSY=1 needs an image with the busy guard (GR8_IMAGE=${GR8_IMAGE:-$GR8_IMAGE_V3} is not verified to carry one; pin the stock build GR8_IMAGE=$GR8_IMAGE_V3, gr8 PR #516 merged before ca7e874 and v1.2.0, or set BUSY_KNOWN_GOOD_DIGESTS to a build you verified against its knob table), and GR8_BUSY_* ride EXTRA_ENV" >&2; exit 2; }
     # v3 recipe defaults when BUSY=1: gr8's own upstream 60/60/8 — the pair the measured v3 lane runs. For an
     # agent lane whose clients obey Retry-After, 120/20 (the v2.1 pair) keeps an obedient client's run alive.
     busy_idle="${BUSY_IDLE_SECS:-60}"; busy_retry="${BUSY_RETRY_AFTER:-60}"; busy_queue="${BUSY_QUEUE_MAX:-8}"

@@ -57,9 +57,9 @@ grep -q '^KVB=fp8$' .env.example || fail ".env.example: the KVB=fp8 serving knob
 grep -q '^CP_ONECHAIN=1$' .env.example || fail ".env.example: the CP_ONECHAIN=1 serving knob missing"
 grep -q '^S2_SHARED_WATERFILL=1$' .env.example || fail ".env.example: the S2_SHARED_WATERFILL=1 serving knob missing"
 grep -q '^KV_WRITE_LIMIT=0.5$' .env.example || fail ".env.example: the KV_WRITE_LIMIT=0.5 serving knob missing"
-grep -q '^GR8_IMAGE=gr8:a3f44a0-attic$' .env.example \
+grep -q '^GR8_IMAGE=gr8:v120-attic-a1a4$' .env.example \
   || fail ".env.example: the v3 default GR8_IMAGE (the attic build of the pinned stock image) missing"
-grep -q '^#GR8_IMAGE=ghcr.io/kindlingai/gr8:v1.1.1@sha256:fa5c9f66fbfa55d162782578b3262893b782e6365a76562bcab951b54acc6d96$' .env.example \
+grep -q '^#GR8_IMAGE=ghcr.io/kindlingai/gr8:v1.2.0@sha256:3de05aab8cda21fd5d6b4af89ccdba6ff5abdbd704729601fd348fa638ade9fd$' .env.example \
   || fail ".env.example: the commented stock pin (the ATTIC=0 image) missing"
 grep -q '^EXTRA_ENV=GR8_GEN_CACHE=/var/lib/gr8/cache/gen GR8_QUIT_FAST=1 GR8_S2_DECODE_PF=4096 GR8_S2_DECODE_ROUNDS=2$' .env.example \
   || fail ".env.example: the v3 EXTRA_ENV serving words missing (UPDATE 2: GR8_* knobs ride EXTRA_ENV)"
@@ -115,9 +115,9 @@ out=$(src_knobs TUNE=agents SESS=8 CAP=485376)
 echo "$out" | grep -q 'KV_FORMAT=fp8' || fail "knobs.sh TUNE=agents: KV_FORMAT not explicit fp8: $out"
 # the dial default: CONC=8 (bit280; the shipped .env sets ATTIC=1) resolves the measured attic row 1048576 (v3.2);
 # attic off has no bit280 CONC=8 row, so the dial falls back to the TUNE CAP (776704) with a stderr line
-out=$(src_knobs TUNE=quality ATTIC=1 GR8_IMAGE=gr8:a3f44a0-attic)
+out=$(src_knobs TUNE=quality ATTIC=1 GR8_IMAGE=gr8:v120-attic-a1a4)
 echo "$out" | grep -q 'SESS=8 CAP=1048576' || fail "knobs.sh default CONC=8 ATTIC=1 dial: got: $out"
-out=$(src_knobs TUNE=quality CONC=6 ATTIC=1 GR8_IMAGE=gr8:a3f44a0-attic)
+out=$(src_knobs TUNE=quality CONC=6 ATTIC=1 GR8_IMAGE=gr8:v120-attic-a1a4)
 echo "$out" | grep -q 'SESS=6 CAP=776704' || fail "knobs.sh CONC=6 ATTIC=1 (the v3 row): got: $out"
 err=$(src_knobs TUNE=quality 2>&1 >/dev/null)
 echo "$err" | grep -q "CAP not measured for this CONC on this VARIANT" || fail "knobs.sh default dial attic off: no fallback stderr line: $err"
@@ -177,6 +177,14 @@ err=$(src_knobs TUNE=quality BUSY=1 BUSY_RETRY_AFTER=notanumber 2>&1) || rc=$?
 grep -q "BUSY_RETRY_AFTER 60" knobs.sh || fail "knobs.sh: BUSY_RETRY_AFTER default 60 missing"
 grep -q "recipe 60 (gr8 upstream 60)" README.md || fail "README.md: BUSY_RETRY_AFTER default row not the recipe 60"
 grep -q "BUSY_IDLE_SECS 60, BUSY_RETRY_AFTER 60" AGENTS.md || fail "AGENTS.md: the v3 BUSY defaults missing"
+# v3.3: the README build of the default image names v1.2.0 and the two gr8 main commits, and the default
+# tag matches .env.example in README and AGENTS; no placeholder is left in the docs
+grep -q '^  git cherry-pick d4af92d5 77e82fef' README.md || fail "README.md: the v3.3 build step (#612 d4af92d5, #613 77e82fef) missing"
+grep -q 'git checkout -b v120-attic-a1a4 ab2eb95f' README.md || fail "README.md: the v3.3 build base (gr8 v1.2.0 ab2eb95f) missing"
+grep -q 'gr8:v120-attic-a1a4' AGENTS.md || fail "AGENTS.md: the v3.3 default image tag missing"
+python3 -c 'import json,sys; v=json.load(open("kindling.json"))["version"]; sys.exit(0 if v==3.3 else 1)' \
+  || fail "kindling.json: version is not 3.3"
+if grep -nE 'PROOF_BOOT_LINE|\[TBD\]' README.md AGENTS.md kindling.json; then fail "docs: a placeholder is left"; fi
 err=$(src_knobs TUNE=agents SESS= CAP= VARIANT=home CONC=4 CAP=900000 2>&1 >/dev/null)
 echo "$err" | grep -q "is above the measured 776704" || fail "knobs.sh CONC=4 over-cap: no warning: $err"
 out=$(src_knobs TUNE=agents SESS= CAP= VARIANT=home CONC=4 CAP=700000)
